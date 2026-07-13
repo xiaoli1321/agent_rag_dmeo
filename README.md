@@ -87,13 +87,16 @@ EMBEDDING_VECTOR_SIZE=1024
 
 ## C1 RAG 防线分层
 
-产品咨询 Agent 的 RAG 链路拆成五个可观察节点：
+产品咨询 Agent 的 RAG 链路采用 **Self-RAG + CRAG 的受控子集**，并把每个决策显示在 Web UI：
 
-1. `rewrite_question`：把“它/这个”等追问补全为当前产品问题。
+1. `rewrite_question`：LLM 以结构化输出生成可检索的独立问题；它只补会话中明确给出的上下文，不猜测答案。没有 LLM 时只做通用的 topic 拼接兜底，绝不靠“它/这个/传感器”词表判断指代。
 2. `retrieve`：沿用 dense/hybrid 检索，并保留 candidate hits。
-3. `grade_documents`：对每个候选文档输出 `binary_score=yes|no`、原因和失败类型。
-4. `generate`：只使用 grader 通过的文档生成答案。
-5. `hallucination_check`：检查答案是否有引用、数字是否被证据支撑。
+3. `grade_documents`：每个候选文档交给 temperature=0 的结构化 LLM grader，输出 `binary_score=yes|no` 和原因；向量分数只作为成本与噪声的前置门槛，不作为事实相关性的判定。LLM 不可用时才使用通用 token-overlap 兜底，并在 trace 标记 `grader=heuristic`。
+4. `corrective_rewrite → retrieve_retry → grade_documents_retry`：如果所有候选都被拒绝，CRAG 将被拒的片段作为负反馈，最多按 `AGENT_CORRECTIVE_RETRIES`（默认 1）重写并重试一次；仍无证据就拒答，避免无限循环。
+5. `generate`：只使用 grader 通过的文档生成答案。
+6. `hallucination_check`：先验证系统拼接的引用格式，再使用结构化 grounding/hallucination grader 逐项判断答案是否超出证据；LLM 不可用时保留数字一致性校验作为降级保护。
+
+这不是直接复制官方教程的完整 Agent loop：客服知识库场景不允许模型自由决定“直接回答”，因此所有产品事实都必须经过检索、grader 和 grounding gate。结构上对齐 LangGraph 的 `grade documents(binary_score) → rewrite → retrieve` 条件闭环，并补上生成后的 hallucination grader；生产环境应进一步将 grader prompt/version、拒绝原因、重试次数、延迟和人工标注结果写入观测与离线评估集。
 
 Web UI 的 “C1 防线” 面板会展示每个节点状态，以及被 grader 拦下的候选文档。推荐演示问题是 `连接码是几位数？`：它可能召回包含 `14 天`、`IP28` 的高分参数片段，但 grader 会判定这不是连接码证据，失败类型为 `retrieval_mismatch`。
 

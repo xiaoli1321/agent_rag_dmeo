@@ -665,7 +665,7 @@ HTML_PAGE = """<!doctype html>
         const item = document.createElement("div");
         item.className = "step";
         const title = document.createElement("strong");
-        title.textContent = `grader 拦截 · ${grade.failure_type || "unknown"}`;
+        title.textContent = `grader 拦截 · ${grade.failure_type || "unknown"} · ${grade.grader || "unknown"} · 第 ${Number(grade.attempt || 0) + 1} 次`;
         const body = document.createElement("div");
         body.textContent = `${grade.source_title} chunk #${grade.chunk_index} · ${grade.reason}`;
         item.appendChild(title);

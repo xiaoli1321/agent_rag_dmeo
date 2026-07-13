@@ -46,6 +46,8 @@ class DemoSettings(BaseSettings):
     agent_min_relevance_score: float = Field(default=0.35, ge=0.0, le=1.0)
     agent_retrieval_strategy: str = "hybrid"
     agent_fusion_alpha: float = Field(default=0.7, ge=0.0, le=1.0)
+    agent_corrective_retries: int = Field(default=1, ge=0, le=2)
+    agent_llm_graders_enabled: bool = True
     agent_run_log_enabled: bool = True
     agent_run_log_dir: Path = Field(default_factory=lambda: DEMO_ROOT / "data" / "runs")
     demo_chunking_strategy: str = "structural"

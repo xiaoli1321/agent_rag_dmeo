@@ -6,7 +6,15 @@ from customer_agent_demo.config import DemoSettings
 
 
 def _service() -> RagService:
-    return RagService(settings=DemoSettings(agent_top_k=4, agent_min_relevance_score=0.35))
+    return RagService(settings=_test_settings())
+
+
+def _test_settings() -> DemoSettings:
+    return DemoSettings(
+        agent_top_k=4, agent_min_relevance_score=0.35, agent_llm_graders_enabled=False,
+        qwen_api_base=None, qwen_api_key=None, qwen_llm_model=None,
+        llm_api_base=None, llm_api_key=None, llm_model=None,
+    )
 
 
 def _doc(text: str, *, score: float = 0.82, title: str = "CGM 参数说明") -> RetrievedDoc:
@@ -55,6 +63,32 @@ def test_c1_marks_empty_retrieval_as_knowledge_missing() -> None:
     assert result.evidence_decision
     assert result.evidence_decision.reason == "knowledge_missing"
     assert result.debug_trace["candidate_hits"] == []
+
+
+def test_c1_uses_bounded_corrective_retrieval_after_all_docs_are_rejected() -> None:
+    class StubRagService(RagService):
+        calls = 0
+
+        def retrieve(self, question: str, *, topic_hint: str | None = None) -> list[RetrievedDoc]:
+            self.calls += 1
+            if self.calls == 1:
+                return [_doc("设备支持 14 天连续监测。")]
+            return [_doc("连接码位于设备包装内，请按 App 引导填写。")]
+
+    service = StubRagService(settings=_service().settings)
+    result = service.answer("连接码在哪里？")
+
+    assert result.answer_status == "grounded"
+    assert service.calls == 2
+    assert [step["name"] for step in result.debug_trace["pipeline_steps"][:6]] == [
+        "rewrite_question",
+        "retrieve",
+        "grade_documents",
+        "corrective_rewrite",
+        "retrieve_retry",
+        "grade_documents_retry",
+    ]
+    assert result.debug_trace["document_grades"][0]["attempt"] == 1
 
 
 def test_c1_hallucination_check_rejects_unsupported_numbers() -> None:

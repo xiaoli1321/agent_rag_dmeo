@@ -6,15 +6,20 @@ from time import perf_counter
 from typing import Callable, TypeVar
 
 from customer_agent_demo.agent.embeddings import get_embeddings
-from customer_agent_demo.agent.models import DocumentGrade, EvidenceDecision, HallucinationDecision, RagResult, RetrievedDoc
+from customer_agent_demo.agent.models import (
+    DocumentGrade,
+    EvidenceDecision,
+    GroundingGrade,
+    HallucinationDecision,
+    QueryRewrite,
+    RagResult,
+    RelevanceGrade,
+    RetrievedDoc,
+)
 from customer_agent_demo.agent.prompts import load_prompt
 from customer_agent_demo.config import DemoSettings
 
 
-PARAMETER_QUESTION_PATTERN = re.compile(
-    r"(几位|多少|多久|几天|多少天|多深|几米|等级|ip\d*|位数|有效期|防水|水下|小时|分钟|天)"
-)
-NUMERIC_EVIDENCE_PATTERN = re.compile(r"(\d+|一|二|三|四|五|六|七|八|九|十|半)")
 REFERENCE_SECTION_PATTERN = re.compile(
     r"(?:^|\n)\s*(?:引用|引用列表|参考|参考资料|参考来源|资料来源|来源)\s*(?:如下|列表)?\s*[:：]?\s*\n?[\s\S]*$",
     re.IGNORECASE,
@@ -24,24 +29,6 @@ INSUFFICIENT_ANSWER_PATTERN = re.compile(
     r"(没有在当前知识库找到足够依据|没有足够依据|无相关数据支持|知识库中无相关|未找到.*依据|无法.*确认|无法.*回答)"
 )
 INSUFFICIENT_EVIDENCE_ANSWER = "我没有在当前知识库找到足够依据。为了避免误导，我先不编造答案。你可以补充设备型号、使用场景或问题细节，我再继续帮你查。"
-PARAMETER_SUPPORT_KEYWORDS = {
-    "连接码": ("连接码", "配对码", "校验码", "二维码", "序列号"),
-    "过期": ("过期", "有效期", "失效", "到期"),
-    "有效期": ("有效期", "过期", "失效", "到期"),
-    "防水": ("防水", "waterproof", "water-resistant", "游泳", "洗澡", "水下"),
-    "游泳": ("游泳", "swim", "swimming", "waterproof", "water-resistant", "水下"),
-    "洗澡": ("洗澡", "shower", "bath", "waterproof", "water-resistant", "水下"),
-    "佩戴": ("佩戴", "wear", "传感器", "sensor"),
-}
-OUT_OF_DOMAIN_CONTEXT_TERMS = (
-    "火星",
-    "月球",
-    "真空",
-    "太空",
-    "宇宙",
-    "航天",
-    "外星",
-)
 RISKY_NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:位|天|小时|分钟|米|feet|ft|%|℃|°c|mg/dl|mmol/l)?", re.IGNORECASE)
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]{2,}")
 STOPWORDS = {"可以", "能不能", "是不是", "怎么", "多少", "多久", "这个", "它", "请问", "一下"}
@@ -57,7 +44,7 @@ class RagService:
         rewritten_question = _timed_step(
             pipeline_steps,
             "rewrite_question",
-            lambda: self._rewrite_question(question, topic_hint=topic_hint),
+            lambda: self._rewrite_question(question, topic_hint=topic_hint).rewritten_question,
         )
         candidates = _timed_step(
             pipeline_steps,
@@ -70,9 +57,37 @@ class RagService:
         grades = _timed_step(
             pipeline_steps,
             "grade_documents",
-            lambda: self.grade_documents(rewritten_question, candidates),
+            lambda: self.grade_documents(rewritten_question, candidates, attempt=0),
         )
         docs = [doc for doc, grade in zip(candidates, grades) if grade.binary_score == "yes"]
+        # CRAG-style bounded correction: rejected retrieval feeds a query rewrite,
+        # then retrieval and grading run once more.  A hard cap prevents loops/cost spikes.
+        for attempt in range(1, self.settings.agent_corrective_retries + 1):
+            if docs or not candidates:
+                break
+            rewritten_question = _timed_step(
+                pipeline_steps,
+                "corrective_rewrite",
+                lambda: self._rewrite_question(
+                    question,
+                    topic_hint=topic_hint,
+                    rejected_docs=candidates,
+                ).rewritten_question,
+            )
+            candidates = _timed_step(
+                pipeline_steps,
+                "retrieve_retry",
+                lambda: dedupe_retrieved_sources(
+                    self.retrieve(rewritten_question, topic_hint=topic_hint),
+                    limit=self.settings.agent_top_k,
+                ),
+            )
+            grades = _timed_step(
+                pipeline_steps,
+                "grade_documents_retry",
+                lambda: self.grade_documents(rewritten_question, candidates, attempt=attempt),
+            )
+            docs = [doc for doc, grade in zip(candidates, grades) if grade.binary_score == "yes"]
         evidence_decision = self._decide_evidence(rewritten_question, candidates, docs, grades)
         _annotate_last_step(
             pipeline_steps,
@@ -200,24 +215,28 @@ class RagService:
         fused = HybridRetriever(alpha=self.settings.agent_fusion_alpha).fuse(dense_docs_to_hits(dense_docs), sparse_hits)
         return [hit.doc for hit in fused[: self.settings.agent_top_k]]
 
-    def grade_documents(self, question: str, docs: list[RetrievedDoc]) -> list[DocumentGrade]:
-        return [self._grade_document(question, doc) for doc in docs]
+    def grade_documents(self, question: str, docs: list[RetrievedDoc], *, attempt: int = 0) -> list[DocumentGrade]:
+        return [self._grade_document(question, doc, attempt=attempt) for doc in docs]
 
-    def _grade_document(self, question: str, doc: RetrievedDoc) -> DocumentGrade:
+    def _grade_document(self, question: str, doc: RetrievedDoc, *, attempt: int) -> DocumentGrade:
         score = doc.final_score if doc.final_score is not None else doc.score
         if score < self.settings.agent_min_relevance_score:
-            return _document_grade(doc, "no", "score_below_min_relevance", "retrieval_mismatch")
-        if _has_unsupported_context(question, [doc]):
-            return _document_grade(doc, "no", "question_context_not_supported_by_document", "retrieval_mismatch")
-        if _is_parameter_question(question):
-            if not _has_numeric_evidence(doc.chunk_text):
-                return _document_grade(doc, "no", "parameter_question_without_numeric_evidence", "retrieval_mismatch")
-            if not _has_parameter_topic_support(question, [doc]):
-                return _document_grade(doc, "no", "parameter_question_without_topic_evidence", "retrieval_mismatch")
-        overlap = _keyword_overlap(question, doc.chunk_text)
-        if overlap == 0 and len(question) >= 8:
-            return _document_grade(doc, "no", "no_meaningful_keyword_overlap", "retrieval_mismatch")
-        return _document_grade(doc, "yes", "document_semantically_relevant", None)
+            return _document_grade(doc, "no", "score_below_min_relevance", "retrieval_mismatch", attempt=attempt)
+        if self.settings.llm_configured and self.settings.agent_llm_graders_enabled:
+            try:
+                grade = self._llm_document_grade(question, doc)
+                return _document_grade(
+                    doc, grade.binary_score, grade.reason,
+                    None if grade.binary_score == "yes" else "retrieval_mismatch",
+                    grader="llm", attempt=attempt,
+                )
+            except Exception:
+                # Availability failures must not turn into unsupported answers.
+                pass
+        overlap, coverage = _keyword_overlap_coverage(question, doc.chunk_text)
+        if overlap == 0 or coverage < 0.25:
+            return _document_grade(doc, "no", "heuristic_insufficient_query_coverage", "retrieval_mismatch", attempt=attempt)
+        return _document_grade(doc, "yes", "heuristic_relevance_fallback", None, attempt=attempt)
 
     def check_hallucination(self, answer: str, docs: list[RetrievedDoc]) -> HallucinationDecision:
         has_reference_line = any(REFERENCE_LINE_PATTERN.match(line) for line in answer.splitlines())
@@ -226,6 +245,17 @@ class RagService:
 
         evidence_text = "\n".join(doc.chunk_text for doc in docs)
         answer_body = REFERENCE_SECTION_PATTERN.sub("", answer).strip()
+        if self.settings.llm_configured and self.settings.agent_llm_graders_enabled:
+            try:
+                grade = self._llm_grounding_grade(answer_body, evidence_text)
+                if not grade.grounded:
+                    return HallucinationDecision(
+                        status="failed", reason=grade.reason, failure_type="hallucination",
+                        unsupported_claims=grade.unsupported_claims, grader="llm",
+                    )
+                return HallucinationDecision(status="grounded", reason=grade.reason, grader="llm")
+            except Exception:
+                pass
         unsupported_numbers = [
             number
             for number in RISKY_NUMBER_PATTERN.findall(answer_body)
@@ -236,19 +266,25 @@ class RagService:
                 status="failed",
                 reason="answer_contains_numbers_not_supported_by_evidence",
                 failure_type="hallucination",
-                risky_numbers=unsupported_numbers,
+                risky_numbers=unsupported_numbers, grader="heuristic",
             )
-        return HallucinationDecision(status="grounded", reason="answer_supported_by_graded_evidence")
+        return HallucinationDecision(status="grounded", reason="heuristic_grounding_fallback", grader="heuristic")
 
-    def _rewrite_question(self, question: str, *, topic_hint: str | None = None) -> str:
+    def _rewrite_question(
+        self, question: str, *, topic_hint: str | None = None, rejected_docs: list[RetrievedDoc] | None = None,
+    ) -> QueryRewrite:
         stripped = question.strip()
-        if not topic_hint:
-            return stripped
-        if topic_hint.lower() in stripped.lower():
-            return stripped
-        if any(term in stripped for term in ("它", "这个", "该设备", "传感器")):
-            return f"{topic_hint}：{stripped}"
-        return stripped
+        if not self.settings.llm_configured:
+            context = f"{topic_hint}\n" if topic_hint and topic_hint.lower() not in stripped.lower() else ""
+            return QueryRewrite(rewritten_question=f"{context}{stripped}", reason="contextualized_query_fallback")
+        rejected_context = "\n\n".join(doc.chunk_text[:600] for doc in (rejected_docs or []))
+        try:
+            chat = self._structured_chat(max_tokens=300)
+            return chat.with_structured_output(QueryRewrite).invoke(
+                load_prompt("rag_rewrite.md").format(question=stripped, topic_hint=topic_hint or "", rejected_context=rejected_context)
+            )
+        except Exception:
+            return QueryRewrite(rewritten_question=stripped, reason="rewrite_model_unavailable")
 
     def _decide_evidence(
         self,
@@ -284,38 +320,7 @@ class RagService:
                 top_score=top_score,
             )
 
-        if _has_unsupported_context(question, docs):
-            return EvidenceDecision(
-                status="insufficient_evidence",
-                reason="question_context_not_supported_by_evidence",
-                top_score=top_score,
-            )
-
-        if _is_parameter_question(question):
-            has_numeric_support = any(_has_numeric_evidence(doc.chunk_text) for doc in docs[: self.settings.agent_top_k])
-            has_topic_support = _has_parameter_topic_support(question, docs[: self.settings.agent_top_k])
-            if not has_numeric_support:
-                return EvidenceDecision(
-                    status="insufficient_evidence",
-                    reason="parameter_question_without_numeric_evidence",
-                    top_score=top_score,
-                    has_numeric_support=False,
-                )
-            if not has_topic_support:
-                return EvidenceDecision(
-                    status="insufficient_evidence",
-                    reason="parameter_question_without_topic_evidence",
-                    top_score=top_score,
-                    has_numeric_support=True,
-                )
-            return EvidenceDecision(
-                status="grounded",
-                reason="parameter_question_with_numeric_evidence",
-                top_score=top_score,
-                has_numeric_support=True,
-            )
-
-        return EvidenceDecision(status="grounded", reason="top_score_meets_threshold", top_score=top_score)
+        return EvidenceDecision(status="grounded", reason="graded_evidence_available", top_score=top_score)
 
     def _build_debug_trace(
         self,
@@ -399,6 +404,28 @@ class RagService:
         if isinstance(content, list):
             return "\n".join(item.get("text", "") for item in content if isinstance(item, dict)).strip()
         return str(content).strip()
+
+    def _structured_chat(self, *, max_tokens: int) -> object:
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            api_key=self.settings.llm_api_key,
+            base_url=self.settings.llm_api_base,
+            model=self.settings.llm_model,
+            temperature=0,
+            max_tokens=max_tokens,
+            extra_body=self.settings.llm_extra_body,
+        )
+
+    def _llm_document_grade(self, question: str, doc: RetrievedDoc) -> RelevanceGrade:
+        chat = self._structured_chat(max_tokens=250)
+        prompt = load_prompt("rag_document_grader.md").format(question=question, document=doc.chunk_text)
+        return chat.with_structured_output(RelevanceGrade).invoke(prompt)
+
+    def _llm_grounding_grade(self, answer: str, evidence: str) -> GroundingGrade:
+        chat = self._structured_chat(max_tokens=350)
+        prompt = load_prompt("rag_grounding_grader.md").format(answer=answer, evidence=evidence)
+        return chat.with_structured_output(GroundingGrade).invoke(prompt)
 
 
 def format_references(docs: list[RetrievedDoc]) -> str:
@@ -485,6 +512,9 @@ def _document_grade(
     binary_score: str,
     reason: str,
     failure_type: str | None,
+    *,
+    grader: str = "heuristic",
+    attempt: int = 0,
 ) -> DocumentGrade:
     return DocumentGrade(
         source_title=doc.source_title,
@@ -494,6 +524,8 @@ def _document_grade(
         reason=reason,
         failure_type=failure_type,  # type: ignore[arg-type]
         score=_ranking_score(doc),
+        grader=grader,  # type: ignore[arg-type]
+        attempt=attempt,
     )
 
 
@@ -502,10 +534,6 @@ def _fallback_grounded_answer(docs: list[RetrievedDoc]) -> str:
     for doc in docs[:2]:
         lines.append(f"- {doc.chunk_text}")
     return "\n".join(lines)
-
-
-def _is_parameter_question(question: str) -> bool:
-    return PARAMETER_QUESTION_PATTERN.search(question.lower()) is not None
 
 
 def _normalize_title(t: str) -> str:
@@ -556,60 +584,42 @@ def _source_identity(doc: RetrievedDoc) -> tuple[str, str]:
     return ("title", re.sub(r"\s+", "", doc.source_title).strip().lower())
 
 
-def _has_numeric_evidence(text: str) -> bool:
-    return NUMERIC_EVIDENCE_PATTERN.search(text.lower()) is not None
-
-
-def _has_parameter_topic_support(question: str, docs: list[RetrievedDoc]) -> bool:
-    question_lower = question.lower()
-    joined_evidence = "\n".join(doc.chunk_text.lower() for doc in docs)
-    matched_keyword_groups = [
-        support_terms
-        for keyword, support_terms in PARAMETER_SUPPORT_KEYWORDS.items()
-        if keyword.lower() in question_lower
-    ]
-    if not matched_keyword_groups:
-        return True
-    return all(any(term.lower() in joined_evidence for term in terms) for terms in matched_keyword_groups)
-
-
 def _keyword_overlap(question: str, evidence: str) -> int:
+    return _keyword_overlap_coverage(question, evidence)[0]
+
+
+def _keyword_overlap_coverage(question: str, evidence: str) -> tuple[int, float]:
     eng_tokens = re.findall(r"[a-zA-Z0-9]+", question)
     han_chars = re.findall(r"[\u4e00-\u9fff]", question)
     han_bigrams = [han_chars[i] + han_chars[i+1] for i in range(len(han_chars)-1)]
-    tokens = set(eng_tokens) | set(han_chars) | set(han_bigrams)
+    # Single Han characters create many accidental matches (for example “在” or
+    # “是”), so the offline fallback deliberately uses only meaningful bigrams.
+    tokens = set(eng_tokens) | set(han_bigrams)
     question_tokens = {t.lower() for t in tokens if t not in STOPWORDS}
     evidence_lower = evidence.lower()
-    return sum(1 for token in question_tokens if token in evidence_lower)
+    overlap = sum(1 for token in question_tokens if token in evidence_lower)
+    return overlap, overlap / len(question_tokens) if question_tokens else 0.0
 
 
 def _is_number_supported(number_str: str, evidence_text: str) -> bool:
     val = number_str.strip()
     if not val:
         return True
-    
+
     # Try to extract the core numeric part (digits and decimals)
     # This allows unit spacing like "2 小时" to match "2" or "2片" or "2"
     num_match = re.match(r"^\d+(?:\.\d+)?", val)
     if not num_match:
         return True
-    
+
     core_num = num_match.group(0)
     if core_num in evidence_text:
         return True
-        
+
     # Year mapping: if core_num is a 4-digit year (e.g. 2023), check if 2-digit representation (23) is in evidence
     if len(core_num) == 4 and core_num.isdigit() and (core_num.startswith("19") or core_num.startswith("20")):
         short_year = core_num[2:]
         if short_year in evidence_text:
             return True
-            
+
     return False
-
-
-def _has_unsupported_context(question: str, docs: list[RetrievedDoc]) -> bool:
-    matched_terms = [term for term in OUT_OF_DOMAIN_CONTEXT_TERMS if term in question]
-    if not matched_terms:
-        return False
-    joined_evidence = "\n".join(doc.chunk_text for doc in docs)
-    return any(term not in joined_evidence for term in matched_terms)

@@ -55,6 +55,8 @@ class DocumentGrade(BaseModel):
     reason: str
     failure_type: FailureType | None = None
     score: float | None = None
+    grader: Literal["llm", "heuristic"] = "heuristic"
+    attempt: int = 0
 
 
 class HallucinationDecision(BaseModel):
@@ -62,6 +64,30 @@ class HallucinationDecision(BaseModel):
     reason: str
     failure_type: FailureType | None = None
     risky_numbers: list[str] = Field(default_factory=list)
+    grader: Literal["llm", "heuristic"] = "heuristic"
+    unsupported_claims: list[str] = Field(default_factory=list)
+
+
+class QueryRewrite(BaseModel):
+    """A retrieval-ready query, kept separate from the user's original wording."""
+
+    rewritten_question: str = Field(description="Standalone query that preserves the user's intent and constraints.")
+    reason: str = Field(description="Short explanation of the rewrite decision.")
+
+
+class RelevanceGrade(BaseModel):
+    """Self-RAG/CRAG document relevance decision."""
+
+    binary_score: Literal["yes", "no"] = Field(description="yes only when this document can help answer the question.")
+    reason: str = Field(description="Short evidence-based reason.")
+
+
+class GroundingGrade(BaseModel):
+    """Post-generation answer grounding decision."""
+
+    grounded: bool = Field(description="Whether every factual claim in the answer is supported by the evidence.")
+    unsupported_claims: list[str] = Field(default_factory=list, description="Unsupported factual claims, if any.")
+    reason: str = Field(description="Short evidence-based reason.")
 
 
 class RagResult(BaseModel):
