@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	perceive(perceive)
+	product_consultant(product_consultant)
+	after_sales(after_sales)
+	empathy_agent(empathy_agent)
+	smalltalk(smalltalk)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> perceive;
+	perceive -.-> product_consultant;
+	perceive -.-> after_sales;
+	perceive -.-> empathy_agent;
+	perceive -.-> smalltalk;
+	empathy_agent -. &nbsp;Command goto&nbsp; .-> product_consultant;
+	empathy_agent -. &nbsp;Command goto&nbsp; .-> after_sales;
+	empathy_agent -. &nbsp;Command goto END&nbsp; .-> __end__;
+	product_consultant -. &nbsp;Command goto&nbsp; .-> after_sales;
+	product_consultant --> __end__;
+	after_sales --> __end__;
+	smalltalk --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

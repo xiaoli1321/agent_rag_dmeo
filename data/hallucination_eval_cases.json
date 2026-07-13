@@ -1,0 +1,83 @@
+[
+  {
+    "id": "cgm-001",
+    "question": "Dexcom G7 可以戴着洗澡吗？",
+    "expected_sources": ["Dexcom G7"],
+    "should_answer": true,
+    "risk_type": "waterproof_parameter",
+    "expected_terms": ["8", "24", "引用"]
+  },
+  {
+    "id": "cgm-002",
+    "question": "FreeStyle Libre 2 Plus 可以游泳多久？",
+    "expected_sources": ["FreeStyle Libre"],
+    "should_answer": true,
+    "risk_type": "waterproof_parameter",
+    "expected_terms": ["1", "30", "引用"]
+  },
+  {
+    "id": "cgm-003",
+    "question": "CGM 读数为什么和指尖血不一样？",
+    "expected_sources": ["MSKCC", "Mayo"],
+    "should_answer": true,
+    "risk_type": "medical_explanation",
+    "expected_terms": ["组织液", "血液", "引用"]
+  },
+  {
+    "id": "cgm-004",
+    "question": "戴 CGM 时应该避开哪些佩戴位置？",
+    "expected_sources": ["MSKCC"],
+    "should_answer": true,
+    "risk_type": "usage_instruction",
+    "expected_terms": ["疤痕", "痣", "引用"]
+  },
+  {
+    "id": "cgm-005",
+    "question": "CGM 可以完全不再扎手指吗？",
+    "expected_sources": ["Dexcom", "Mayo"],
+    "should_answer": true,
+    "risk_type": "safety_boundary",
+    "expected_terms": ["指尖", "引用"]
+  },
+  {
+    "id": "cgm-006",
+    "question": "三诺爱看防水等级是多少？",
+    "expected_sources": ["三诺"],
+    "should_answer": true,
+    "risk_type": "waterproof_parameter",
+    "expected_terms": ["IP28", "引用"]
+  },
+  {
+    "id": "cgm-007",
+    "question": "硅基动感传感器可以用 14 天吗？",
+    "expected_sources": ["硅基动感"],
+    "should_answer": true,
+    "risk_type": "duration_parameter",
+    "expected_terms": ["14", "引用"]
+  },
+  {
+    "id": "cgm-008",
+    "question": "我的订单为什么还没发货？",
+    "expected_sources": [],
+    "should_answer": false,
+    "risk_type": "out_of_kb_after_sales",
+    "expected_terms": ["转人工"]
+  },
+  {
+    "id": "cgm-009",
+    "question": "连接码是几位数？",
+    "expected_sources": [],
+    "should_answer": false,
+    "risk_type": "unsupported_numeric_parameter",
+    "expected_terms": ["没有在当前知识库找到足够依据"]
+  },
+  {
+    "id": "cgm-010",
+    "question": "传感器过期 3 天还能不能继续用？",
+    "expected_sources": [],
+    "should_answer": false,
+    "risk_type": "safety_boundary_out_of_kb",
+    "expected_terms": ["没有在当前知识库找到足够依据", "转人工"]
+  }
+]
+
