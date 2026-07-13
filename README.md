@@ -37,7 +37,6 @@ python -m customer_agent_demo.web --host 127.0.0.1 --port 7860
 bash customer_agent_demo/scripts/start_demo.sh
 ```
 
-本机环境提示：作业目标是 Python 3.13 + Docker Qdrant。当前 WSL 里如果只有 Python 3.12 或没有 Docker，需要先安装 Python 3.13，并在 Docker Desktop 中开启 WSL integration。
 
 ## 安装依赖
 
