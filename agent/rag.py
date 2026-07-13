@@ -158,7 +158,7 @@ class RagService:
             from langchain_qdrant import QdrantVectorStore
         except ImportError as exc:  # pragma: no cover - environment guard
             raise RuntimeError(
-                "Install qdrant-client and langchain-qdrant from requirements-demo.txt."
+                "Install qdrant-client and langchain-qdrant from requirements.txt."
             ) from exc
 
         embeddings = get_embeddings(self.settings)

@@ -211,7 +211,7 @@ def upsert_to_qdrant(chunks: list[Any], settings: DemoSettings) -> None:
         from qdrant_client import QdrantClient
     except ImportError as exc:  # pragma: no cover - environment guard
         raise RuntimeError(
-            "Install qdrant-client and langchain-qdrant from requirements-demo.txt."
+            "Install qdrant-client and langchain-qdrant from requirements.txt."
         ) from exc
 
     client = QdrantClient(url=settings.qdrant_url)

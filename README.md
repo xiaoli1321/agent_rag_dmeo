@@ -42,7 +42,7 @@ bash customer_agent_demo/scripts/start_demo.sh
 ## 安装依赖
 
 ```bash
-python -m pip install -r customer_agent_demo/requirements-demo.txt
+python -m pip install -r requirements.txt
 cp customer_agent_demo/.env.example customer_agent_demo/.env
 ```
 
