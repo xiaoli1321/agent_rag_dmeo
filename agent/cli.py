@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from customer_agent_demo.agent.graph import CustomerAgent, new_thread_id
+from .graph import CustomerAgent, new_thread_id
 
 
 def main() -> None:

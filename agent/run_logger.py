@@ -6,10 +6,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from customer_agent_demo.agent.models import AgentState
+from .models import AgentState
 
 
-SENSITIVE_KEYS = {"api_key", "authorization", "token", "secret", "password", "qwen_api_key"}
+SENSITIVE_KEYS = {
+    "api_key",
+    "authorization",
+    "token",
+    "secret",
+    "password",
+    "qwen_api_key",
+}
 
 
 @dataclass(slots=True)
@@ -38,7 +45,9 @@ class AgentRunLogger:
                 "active_agent": state.get("active_agent"),
                 "current_topic": state.get("current_topic"),
                 "answer_status": state.get("answer_status"),
-                "retrieved_docs": [_dump_model(doc) for doc in state.get("retrieved_docs", [])],
+                "retrieved_docs": [
+                    _dump_model(doc) for doc in state.get("retrieved_docs", [])
+                ],
                 "debug_trace": state.get("debug_trace") or {},
                 "handoff_reason": state.get("handoff_reason"),
                 "latency_ms": latency_ms,
@@ -71,4 +80,3 @@ def _dump_model(value: Any) -> Any:
 def _is_sensitive_key(key: str) -> bool:
     lowered = key.lower()
     return any(sensitive in lowered for sensitive in SENSITIVE_KEYS)
-

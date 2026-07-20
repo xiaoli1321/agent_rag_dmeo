@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from customer_agent_demo.agent.evaluate_hallucination import (
+from ..agent.evaluate_hallucination import (
     evaluate_case,
     evaluate_cases,
     load_cases,
@@ -56,7 +56,9 @@ def test_evaluate_cases_uses_injected_answer_function() -> None:
         answer_fn=lambda question: {
             "answer": f"{question}\n引用：\n[1] Dexcom G7 - https://example.com - chunk #0",
             "answer_status": "grounded",
-            "retrieved_docs": [{"source_title": "Dexcom G7", "source_url": "https://example.com"}],
+            "retrieved_docs": [
+                {"source_title": "Dexcom G7", "source_url": "https://example.com"}
+            ],
         },
     )
 
@@ -85,4 +87,3 @@ def test_write_markdown_report(tmp_path) -> None:
     text = output_path.read_text(encoding="utf-8")
     assert "CGM Agent 幻觉评估结果" in text
     assert "cgm-test" in text
-

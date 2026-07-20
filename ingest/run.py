@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from customer_agent_demo.config import get_settings
-from customer_agent_demo.ingest.pipeline import (
+from ..config import get_settings
+from .pipeline import (
     clean_documents,
     load_sources,
     split_documents,

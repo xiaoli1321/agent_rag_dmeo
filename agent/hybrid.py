@@ -5,8 +5,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from customer_agent_demo.agent.models import RetrievedDoc
-from customer_agent_demo.ingest.pipeline import clean_documents, load_sources, split_documents
+from .models import RetrievedDoc
+from ..ingest.pipeline import clean_documents, load_sources, split_documents
 
 
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]")

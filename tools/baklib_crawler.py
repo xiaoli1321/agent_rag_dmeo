@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 
-from customer_agent_demo.ingest.pipeline import DEFAULT_SOURCES_PATH
+from ..ingest.pipeline import DEFAULT_SOURCES_PATH
 
 
 DEFAULT_START_URL = "https://sibionics.demo.baklib.vip/"
@@ -125,7 +125,11 @@ def clean_baklib_text(value: str) -> str:
     for item in replacements:
         text = text.replace(item, " ")
     text = re.sub(r"\b李强\b", " ", text)
-    text = re.sub(r"提交反馈(?: 上一页 .*?)?(?: 下一页 .*?)? 页内目录 © Baklib\.cn 版权所有 蜀ICP备15035023号$", " ", text)
+    text = re.sub(
+        r"提交反馈(?: 上一页 .*?)?(?: 下一页 .*?)? 页内目录 © Baklib\.cn 版权所有 蜀ICP备15035023号$",
+        " ",
+        text,
+    )
     text = re.sub(r"© Baklib\.cn 版权所有 蜀ICP备15035023号$", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
@@ -140,7 +144,10 @@ def fetch(url: str, *, cookie: str, timeout: float) -> str:
     request = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         content_type = response.headers.get("Content-Type", "")
-        if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
+        if (
+            "text/html" not in content_type
+            and "application/xhtml+xml" not in content_type
+        ):
             raise ValueError(f"skip non-html content: {content_type}")
         charset = response.headers.get_content_charset() or "utf-8"
         return response.read().decode(charset, errors="replace")
@@ -179,7 +186,12 @@ def crawl(
         seen.add(normalized)
         try:
             html = fetch(normalized, cookie=cookie, timeout=timeout)
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError) as exc:
+        except (
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            TimeoutError,
+            ValueError,
+        ) as exc:
             print(f"[skip] {normalized}: {exc}", file=sys.stderr)
             continue
 
@@ -199,7 +211,9 @@ def crawl(
     return pages
 
 
-def to_source_records(pages: list[PageData], *, product_tags: list[str], language: str) -> list[dict[str, object]]:
+def to_source_records(
+    pages: list[PageData], *, product_tags: list[str], language: str
+) -> list[dict[str, object]]:
     return [
         {
             "source_title": page.title,
@@ -214,10 +228,20 @@ def to_source_records(pages: list[PageData], *, product_tags: list[str], languag
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Crawl authorized Baklib pages into customer_agent_demo source JSON.")
-    parser.add_argument("--start-url", default=DEFAULT_START_URL, help=f"Default: {DEFAULT_START_URL}")
-    parser.add_argument("--output", type=Path, default=DEFAULT_SOURCES_PATH, help="Output JSON path.")
-    parser.add_argument("--cookie-env", default="BAKLIB_COOKIE", help="Environment variable that contains the login Cookie header.")
+    parser = argparse.ArgumentParser(
+        description="Crawl authorized Baklib pages into customer_agent_demo source JSON."
+    )
+    parser.add_argument(
+        "--start-url", default=DEFAULT_START_URL, help=f"Default: {DEFAULT_START_URL}"
+    )
+    parser.add_argument(
+        "--output", type=Path, default=DEFAULT_SOURCES_PATH, help="Output JSON path."
+    )
+    parser.add_argument(
+        "--cookie-env",
+        default="BAKLIB_COOKIE",
+        help="Environment variable that contains the login Cookie header.",
+    )
     parser.add_argument("--max-pages", type=int, default=80)
     parser.add_argument("--delay-seconds", type=float, default=0.8)
     parser.add_argument("--timeout", type=float, default=20)
@@ -228,7 +252,11 @@ def parse_args() -> argparse.Namespace:
         help="Applicable models or business objects, for example: --product-tags GS3 ECO",
     )
     parser.add_argument("--language", default="zh")
-    parser.add_argument("--append", action="store_true", help="Append to existing output instead of replacing it.")
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append to existing output instead of replacing it.",
+    )
     return parser.parse_args()
 
 
@@ -236,7 +264,9 @@ def main() -> None:
     args = parse_args()
     cookie = os.environ.get(args.cookie_env, "").strip()
     if not cookie:
-        raise SystemExit(f"Missing authorized Cookie. Set {args.cookie_env} before running.")
+        raise SystemExit(
+            f"Missing authorized Cookie. Set {args.cookie_env} before running."
+        )
     pages = crawl(
         args.start_url,
         cookie=cookie,
@@ -245,13 +275,19 @@ def main() -> None:
         timeout=args.timeout,
     )
     if not pages:
-        raise SystemExit("No pages were crawled. Check whether the Cookie is valid and the start URL is accessible.")
-    records = to_source_records(pages, product_tags=args.product_tags, language=args.language)
+        raise SystemExit(
+            "No pages were crawled. Check whether the Cookie is valid and the start URL is accessible."
+        )
+    records = to_source_records(
+        pages, product_tags=args.product_tags, language=args.language
+    )
     if args.append and args.output.exists():
         existing = json.loads(args.output.read_text(encoding="utf-8"))
         records = [*existing, *records]
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(f"wrote {len(records)} records to {args.output}")
 
 

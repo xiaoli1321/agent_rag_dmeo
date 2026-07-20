@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from customer_agent_demo.agent.hybrid import DenseHit, HybridRetriever, LocalSparseRetriever, SparseHit, _load_local_docs, dense_docs_to_hits
-from customer_agent_demo.agent.models import RetrievedDoc
-from customer_agent_demo.agent.rag import RagService
-from customer_agent_demo.config import DemoSettings
+from ..agent.hybrid import DenseHit, HybridRetriever, LocalSparseRetriever, SparseHit, _load_local_docs, dense_docs_to_hits
+from ..agent.models import RetrievedDoc
+from ..agent.rag import RagService
+from ..config import DemoSettings
 
 
 def _doc(title: str, url: str, text: str, score: float = 0.0) -> RetrievedDoc:

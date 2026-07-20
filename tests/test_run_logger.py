@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from customer_agent_demo.agent.models import EvidenceDecision, PerceptionResult, RetrievedDoc
-from customer_agent_demo.agent.run_logger import AgentRunLogger, sanitize_record
+from ..agent.models import EvidenceDecision, PerceptionResult, RetrievedDoc
+from ..agent.run_logger import AgentRunLogger, sanitize_record
 
 
 def _state() -> dict:

@@ -9,8 +9,8 @@ from socketserver import ThreadingMixIn
 from typing import Any
 from uuid import uuid4
 
-from customer_agent_demo.agent.graph import CustomerAgent, new_thread_id
-from customer_agent_demo.agent.models import PerceptionResult, RetrievedDoc
+from .agent.graph import CustomerAgent, new_thread_id
+from .agent.models import PerceptionResult, RetrievedDoc
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1991,15 +1991,21 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             try:
                 payload = self._read_json()
                 message = str(payload.get("message") or "").strip()
-                thread_id = str(payload.get("thread_id") or "web-default-thread").strip()
+                thread_id = str(
+                    payload.get("thread_id") or "web-default-thread"
+                ).strip()
                 if not message:
-                    self._send_json({"error": "message is required"}, status=HTTPStatus.BAD_REQUEST)
+                    self._send_json(
+                        {"error": "message is required"}, status=HTTPStatus.BAD_REQUEST
+                    )
                     return
                 result = agent.invoke(message, thread_id=thread_id)
                 self._send_json(_state_to_response(result, thread_id=thread_id))
             except Exception as exc:  # pragma: no cover - request safety net
                 LOGGER.exception("chat request failed")
-                self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                self._send_json(
+                    {"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR
+                )
 
         def log_message(self, format: str, *args: Any) -> None:
             LOGGER.info("%s - %s", self.address_string(), format % args)
@@ -2009,7 +2015,9 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             raw = self.rfile.read(length).decode("utf-8")
             return json.loads(raw or "{}")
 
-        def _send_json(self, payload: dict[str, Any], *, status: HTTPStatus = HTTPStatus.OK) -> None:
+        def _send_json(
+            self, payload: dict[str, Any], *, status: HTTPStatus = HTTPStatus.OK
+        ) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -2054,12 +2062,16 @@ def _model_to_dict(value: Any) -> Any:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the CGM customer agent demo web UI.")
+    parser = argparse.ArgumentParser(
+        description="Run the CGM customer agent demo web UI."
+    )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
     agent = CustomerAgent()
     handler = create_handler(agent)
     server = ThreadingHTTPServer((args.host, args.port), handler)

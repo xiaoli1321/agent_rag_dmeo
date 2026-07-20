@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from customer_agent_demo.agent.graph import CustomerAgent
-from customer_agent_demo.agent.models import EvidenceDecision, PerceptionResult, RagResult, RetrievedDoc
-from customer_agent_demo.agent.perception import heuristic_perception
-from customer_agent_demo.agent.rag import INSUFFICIENT_EVIDENCE_ANSWER
+from ..agent.graph import CustomerAgent
+from ..agent.models import EvidenceDecision, PerceptionResult, RagResult, RetrievedDoc
+from ..agent.perception import heuristic_perception
+from ..agent.rag import INSUFFICIENT_EVIDENCE_ANSWER
 
 
 def _perception(

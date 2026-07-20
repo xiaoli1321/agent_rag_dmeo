@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from customer_agent_demo.agent.models import RetrievedDoc
-from customer_agent_demo.agent.rag import (
+from ..agent.models import RetrievedDoc
+from ..agent.rag import (
     RagService,
     _explicit_product_tags,
     _qdrant_product_filter,
@@ -9,7 +9,7 @@ from customer_agent_demo.agent.rag import (
     dedupe_retrieved_sources,
     format_references,
 )
-from customer_agent_demo.config import DemoSettings
+from ..config import DemoSettings
 
 
 def _service() -> RagService:
@@ -237,7 +237,7 @@ def test_llm_refusal_after_grounded_retrieval_keeps_retrieved_docs() -> None:
 
 
 def test_resolve_topic_handles_watch_and_patch() -> None:
-    from customer_agent_demo.agent.graph import _resolve_topic
+    from ..agent.graph import _resolve_topic
 
     class MockRagService(RagService):
         def retrieve(self, question: str, topic_hint: str | None = None) -> list[RetrievedDoc]:
@@ -257,7 +257,7 @@ def test_resolve_topic_handles_watch_and_patch() -> None:
 
 
 def test_keyword_overlap_robustness() -> None:
-    from customer_agent_demo.agent.rag import _keyword_overlap
+    from ..agent.rag import _keyword_overlap
     assert _keyword_overlap("硅基加固贴尺寸是多少", "ECO加固贴尺寸 GS1加固贴尺寸") > 0
     assert _keyword_overlap("Dexcom G7 可以戴着洗澡吗？", "Dexcom says the G7 sensor is waterproof.") > 0
 

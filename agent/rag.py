@@ -5,8 +5,8 @@ import re
 from time import perf_counter
 from typing import Callable, TypeVar
 
-from customer_agent_demo.agent.embeddings import get_embeddings
-from customer_agent_demo.agent.models import (
+from .embeddings import get_embeddings
+from .models import (
     DocumentGrade,
     EvidenceDecision,
     GroundingGrade,
@@ -16,8 +16,8 @@ from customer_agent_demo.agent.models import (
     RelevanceGrade,
     RetrievedDoc,
 )
-from customer_agent_demo.agent.prompts import load_prompt
-from customer_agent_demo.config import DemoSettings
+from .prompts import load_prompt
+from ..config import DemoSettings
 
 
 REFERENCE_SECTION_PATTERN = re.compile(
@@ -297,7 +297,7 @@ class RagService:
         返回:
             list[RetrievedDoc]: 经混合打分与重排后的前 N 个文档。
         """
-        from customer_agent_demo.agent.hybrid import HybridRetriever, LocalSparseRetriever, dense_docs_to_hits
+        from .hybrid import HybridRetriever, LocalSparseRetriever, dense_docs_to_hits
 
         query = f"{topic_hint}\n{question}" if topic_hint else question
         try:

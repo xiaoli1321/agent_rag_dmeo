@@ -7,11 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from customer_agent_demo.agent.embeddings import get_embeddings
-from customer_agent_demo.config import DEMO_ROOT, DemoSettings
+from ..agent.embeddings import get_embeddings
+from ..config import DEMO_ROOT, DemoSettings
 
 
 DEFAULT_SOURCES_PATH = DEMO_ROOT / "data" / "cgm_sources.json"
+
+
 @dataclass(slots=True)
 class SourceDocument:
     source_title: str
@@ -33,7 +35,9 @@ def load_sources(path: Path = DEFAULT_SOURCES_PATH) -> list[SourceDocument]:
         SourceDocument(
             source_title=record["source_title"],
             source_url=record["source_url"],
-            product_tags=_normalize_product_tags(record.get("product_tags", record.get("product"))),
+            product_tags=_normalize_product_tags(
+                record.get("product_tags", record.get("product"))
+            ),
             text=record["text"],
         )
         for record in records
@@ -96,7 +100,9 @@ def split_documents(
         )
         chunks = splitter.split_documents(source_docs)
     except ImportError:
-        chunks = _fallback_split_documents(source_docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        chunks = _fallback_split_documents(
+            source_docs, chunk_size=chunk_size, chunk_overlap=chunk_overlap
+        )
 
     counters: dict[str, int] = {}
     enriched = []
@@ -161,7 +167,9 @@ def _split_with_app_chunking(
     return enriched
 
 
-def _fallback_split_documents(source_docs: list[Any], *, chunk_size: int, chunk_overlap: int) -> list[Any]:
+def _fallback_split_documents(
+    source_docs: list[Any], *, chunk_size: int, chunk_overlap: int
+) -> list[Any]:
     """Small local fallback for environments without langchain-text-splitters."""
     try:
         from langchain_core.documents import Document
@@ -175,7 +183,9 @@ def _fallback_split_documents(source_docs: list[Any], *, chunk_size: int, chunk_
         for start in range(0, len(text), step):
             piece = text[start : start + chunk_size].strip()
             if piece:
-                chunks.append(Document(page_content=piece, metadata=dict(document.metadata)))
+                chunks.append(
+                    Document(page_content=piece, metadata=dict(document.metadata))
+                )
             if start + chunk_size >= len(text):
                 break
     return chunks
@@ -223,7 +233,9 @@ def _stable_chunk_id(source_url: str, index: int, text: str) -> str:
 
 def _normalize_product_tags(value: Any) -> list[str]:
     """接受新数组字段，并兼容历史单值 product 记录。"""
-    raw_tags = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    raw_tags = (
+        [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    )
     tags: list[str] = []
     for item in raw_tags:
         tag = str(item).strip()

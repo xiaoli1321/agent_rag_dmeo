@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from customer_agent_demo.agent.models import RetrievedDoc
-from customer_agent_demo.agent.rag import INSUFFICIENT_EVIDENCE_ANSWER, RagService
-from customer_agent_demo.config import DemoSettings
+from ..agent.models import RetrievedDoc
+from ..agent.rag import INSUFFICIENT_EVIDENCE_ANSWER, RagService
+from ..config import DemoSettings
 
 
 def _service() -> RagService:

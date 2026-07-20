@@ -10,11 +10,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from customer_agent_demo.agent.models import ActiveAgent, AgentState, PerceptionResult, RagResult, RetrievedDoc
-from customer_agent_demo.agent.perception import PerceptionService
-from customer_agent_demo.agent.rag import RagService
-from customer_agent_demo.agent.run_logger import AgentRunLogger
-from customer_agent_demo.config import DemoSettings, get_settings
+from .models import ActiveAgent, AgentState, PerceptionResult, RagResult, RetrievedDoc
+from .perception import PerceptionService
+from .rag import RagService
+from .run_logger import AgentRunLogger
+from ..config import DemoSettings, get_settings
 
 
 # ── 类型别名 ──────────────────────────────────────────────
