@@ -35,7 +35,7 @@ def _grounded_rag(question: str, topic: str | None) -> RagResult:
             vector_score=0.9,
             final_score=0.9,
             retrieval_source="dense",
-            product=topic,
+            product_tags=[topic] if topic else [],
         )
     ]
     return RagResult(
@@ -148,7 +148,7 @@ def test_thread_id_isolates_agent_state() -> None:
     agent.invoke("它防水吗？", thread_id="thread-a")
     agent.invoke("它防水吗？", thread_id="thread-b")
 
-    assert calls == ["硅基动感 CGM", "硅基动感 CGM", None]
+    assert calls == ["GS3", "GS3", None]
 
 
 def test_multiturn_topic_keeps_previous_product_reference() -> None:

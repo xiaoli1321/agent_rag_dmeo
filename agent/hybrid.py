@@ -110,19 +110,24 @@ class HybridRetriever:
 class LocalSparseRetriever:
     def __init__(self, docs: list[RetrievedDoc] | None = None) -> None:
         self.docs = docs if docs is not None else _load_local_docs()
-        self.doc_tokens = [_tokenize(doc.chunk_text + " " + doc.source_title + " " + (doc.product or "")) for doc in self.docs]
+        self.doc_tokens = [
+            _tokenize(doc.chunk_text + " " + doc.source_title + " " + " ".join(doc.product_tags))
+            for doc in self.docs
+        ]
         self.doc_freq: dict[str, int] = {}
         for tokens in self.doc_tokens:
             for token in set(tokens):
                 self.doc_freq[token] = self.doc_freq.get(token, 0) + 1
 
-    def search(self, query: str, *, top_k: int) -> list[SparseHit]:
+    def search(self, query: str, *, top_k: int, product_tags: list[str] | None = None) -> list[SparseHit]:
         query_tokens = _tokenize(query)
         if not query_tokens:
             return []
         hits: list[SparseHit] = []
         total_docs = max(1, len(self.docs))
         for doc, tokens in zip(self.docs, self.doc_tokens):
+            if product_tags and not set(product_tags).intersection(doc.product_tags):
+                continue
             score = 0.0
             token_count = max(1, len(tokens))
             for token in query_tokens:
@@ -190,7 +195,7 @@ def _load_local_docs() -> list[RetrievedDoc]:
                 source_url=metadata["source_url"],
                 chunk_text=str(metadata.get("context_text") or chunk.page_content),
                 score=0.0,
-                product=metadata.get("product"),
+                product_tags=list(metadata.get("product_tags") or []),
                 retrieval_source="sparse",
             )
         )

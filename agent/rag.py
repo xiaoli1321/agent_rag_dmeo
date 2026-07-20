@@ -32,6 +32,18 @@ INSUFFICIENT_EVIDENCE_ANSWER = "我没有在当前知识库找到足够依据。
 RISKY_NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:位|天|小时|分钟|米|feet|ft|%|℃|°c|mg/dl|mmol/l)?", re.IGNORECASE)
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]{2,}")
 STOPWORDS = {"可以", "能不能", "是不是", "怎么", "多少", "多久", "这个", "它", "请问", "一下"}
+PRODUCT_TAG_ALIASES = {
+    "gs1 pro": "GS1 Pro",
+    "gs1": "GS1",
+    "gs3": "GS3",
+    "eco": "ECO",
+    "metatwin": "MetaTwin",
+    "ks3": "KS3",
+    "硅基手表": "硅基手表",
+    "手表": "硅基手表",
+    "硅基动感健康app": "硅基动感健康APP",
+    "健康app": "硅基动感健康APP",
+}
 T = TypeVar("T")
 
 
@@ -248,7 +260,12 @@ class RagService:
         )
         # 将主题提示词与提问拼接作为最终的检索输入，提升检索的领域相关性
         query = f"{topic_hint}\n{question}" if topic_hint else question
-        results = vector_store.similarity_search_with_score(query, k=self.settings.agent_top_k)
+        product_tags = _explicit_product_tags(question)
+        results = vector_store.similarity_search_with_score(
+            query,
+            k=self.settings.agent_top_k,
+            filter=_qdrant_product_filter(product_tags),
+        )
         docs: list[RetrievedDoc] = []
         for document, score in results:
             metadata = document.metadata
@@ -262,7 +279,7 @@ class RagService:
                     vector_score=float(score),
                     final_score=float(score),
                     retrieval_source="dense",
-                    product=metadata.get("product"),
+                    product_tags=list(metadata.get("product_tags") or []),
                 )
             )
         # 按相似度得分降序排列
@@ -288,7 +305,11 @@ class RagService:
         except Exception:
             dense_docs = []
         # 获取稀疏检索结果（本地倒排索引）
-        sparse_hits = LocalSparseRetriever().search(query, top_k=self.settings.agent_top_k * 3)
+        sparse_hits = LocalSparseRetriever().search(
+            query,
+            top_k=self.settings.agent_top_k * 3,
+            product_tags=_explicit_product_tags(question),
+        )
         # 使用归一化加权融合对 Dense 和 Sparse 的结果重排。
         fused = HybridRetriever(alpha=self.settings.agent_fusion_alpha).fuse(dense_docs_to_hits(dense_docs), sparse_hits)
         return [hit.doc for hit in fused[: self.settings.agent_top_k]]
@@ -480,6 +501,7 @@ class RagService:
             "top_k": self.settings.agent_top_k,
             "min_score": self.settings.agent_min_relevance_score,
             "fusion_alpha": self.settings.agent_fusion_alpha if self.settings.agent_retrieval_strategy == "hybrid" else None,
+            "explicit_product_tags": _explicit_product_tags(question),
             "evidence_status": evidence_decision.status,
             "evidence_reason": evidence_decision.reason,
             "document_grades": [grade.model_dump() for grade in grades],
@@ -715,6 +737,32 @@ def _fallback_grounded_answer(docs: list[RetrievedDoc]) -> str:
     for doc in docs[:2]:
         lines.append(f"- {doc.chunk_text}")
     return "\n".join(lines)
+
+
+def _explicit_product_tags(question: str) -> list[str]:
+    """只从用户明确说出的型号/产品提取标签，避免用历史话题误过滤新问题。"""
+    lowered = question.lower()
+    tags: list[str] = []
+    for alias, tag in sorted(PRODUCT_TAG_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        if alias in lowered and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def _qdrant_product_filter(product_tags: list[str]) -> object | None:
+    """构造 Qdrant payload 预过滤；空标签时保持全库召回。"""
+    if not product_tags:
+        return None
+    from qdrant_client.models import FieldCondition, Filter, MatchAny
+
+    return Filter(
+        must=[
+            FieldCondition(
+                key="metadata.product_tags",
+                match=MatchAny(any=product_tags),
+            )
+        ]
+    )
 
 
 def _normalize_title(t: str) -> str:

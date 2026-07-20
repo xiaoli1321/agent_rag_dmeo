@@ -68,6 +68,17 @@ def test_local_sparse_retriever_finds_keyword_match() -> None:
     assert hits[0].doc.source_title == "Dexcom G7 FAQ"
 
 
+def test_local_sparse_retriever_filters_explicit_product_tags() -> None:
+    gs3 = _doc("GS3 蓝牙连接", "gs3", "蓝牙连接失败")
+    gs3.product_tags = ["GS3"]
+    eco = _doc("ECO 蓝牙连接", "eco", "蓝牙连接失败")
+    eco.product_tags = ["ECO"]
+
+    hits = LocalSparseRetriever(docs=[gs3, eco]).search("蓝牙连接", top_k=2, product_tags=["ECO"])
+
+    assert [hit.doc.source_title for hit in hits] == ["ECO 蓝牙连接"]
+
+
 def test_rag_service_hybrid_uses_sparse_when_dense_unavailable() -> None:
     settings = DemoSettings(
         qwen_api_base="",

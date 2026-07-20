@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from customer_agent_demo.agent.models import RetrievedDoc
-from customer_agent_demo.agent.rag import RagService, _strip_generated_references, dedupe_retrieved_sources, format_references
+from customer_agent_demo.agent.rag import (
+    RagService,
+    _explicit_product_tags,
+    _qdrant_product_filter,
+    _strip_generated_references,
+    dedupe_retrieved_sources,
+    format_references,
+)
 from customer_agent_demo.config import DemoSettings
 
 
@@ -88,6 +95,15 @@ def test_document_grader_rejects_unrelated_context_without_domain_word_rules() -
 
     assert decision.binary_score == "no"
     assert decision.failure_type == "retrieval_mismatch"
+
+
+def test_explicit_product_tags_build_qdrant_prefilter() -> None:
+    tags = _explicit_product_tags("GS3 蓝牙连不上，ECO 也有类似问题吗？")
+    metadata_filter = _qdrant_product_filter(tags)
+
+    assert tags == ["GS3", "ECO"]
+    assert metadata_filter is not None
+    assert metadata_filter.model_dump()["must"][0]["key"] == "metadata.product_tags"
 
 
 def test_debug_trace_contains_required_fields() -> None:
@@ -229,15 +245,15 @@ def test_resolve_topic_handles_watch_and_patch() -> None:
                 return []
             if any(w in question.lower() for w in ("手表", "watch", "加固贴")):
                 doc = _doc("硅基手表/加固贴的相关内容", score=0.8)
-                doc.product = "硅基动感 CGM"
+                doc.product_tags = ["硅基手表"]
                 return [doc]
             return []
 
     service = MockRagService(settings=_test_settings())
-    assert _resolve_topic("手表什么时候上线", None, service) == "硅基动感 CGM"
-    assert _resolve_topic("watch functions", None, service) == "硅基动感 CGM"
+    assert _resolve_topic("手表什么时候上线", None, service) == "硅基手表"
+    assert _resolve_topic("watch functions", None, service) == "硅基手表"
     assert _resolve_topic("硅基加固贴尺寸", None, service) == "硅基动感 CGM"
-    assert _resolve_topic("加固贴", "Dexcom G7", service) == "硅基动感 CGM"
+    assert _resolve_topic("加固贴", "Dexcom G7", service) == "硅基手表"
 
 
 def test_keyword_overlap_robustness() -> None:

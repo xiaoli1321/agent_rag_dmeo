@@ -199,14 +199,14 @@ def crawl(
     return pages
 
 
-def to_source_records(pages: list[PageData], *, product: str, language: str) -> list[dict[str, str]]:
+def to_source_records(pages: list[PageData], *, product_tags: list[str], language: str) -> list[dict[str, object]]:
     return [
         {
             "source_title": page.title,
             "source_url": page.url,
             "source_type": "baklib-authorized-page",
             "language": language,
-            "product": product,
+            "product_tags": product_tags,
             "text": page.text,
         }
         for page in pages
@@ -221,7 +221,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-pages", type=int, default=80)
     parser.add_argument("--delay-seconds", type=float, default=0.8)
     parser.add_argument("--timeout", type=float, default=20)
-    parser.add_argument("--product", default="硅基动感 CGM")
+    parser.add_argument(
+        "--product-tags",
+        nargs="+",
+        default=["未分类"],
+        help="Applicable models or business objects, for example: --product-tags GS3 ECO",
+    )
     parser.add_argument("--language", default="zh")
     parser.add_argument("--append", action="store_true", help="Append to existing output instead of replacing it.")
     return parser.parse_args()
@@ -241,7 +246,7 @@ def main() -> None:
     )
     if not pages:
         raise SystemExit("No pages were crawled. Check whether the Cookie is valid and the start URL is accessible.")
-    records = to_source_records(pages, product=args.product, language=args.language)
+    records = to_source_records(pages, product_tags=args.product_tags, language=args.language)
     if args.append and args.output.exists():
         existing = json.loads(args.output.read_text(encoding="utf-8"))
         records = [*existing, *records]

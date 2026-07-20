@@ -302,10 +302,16 @@ def _message_to_text(message: BaseMessage) -> str:
     return str(message.content)
 
 
-def _map_product_to_topic(product: str | None) -> str | None:
-    if not product:
+def _map_product_tags_to_topic(product_tags: list[str]) -> str | None:
+    """仅单一产品标签可以自动成为会话主题；通用资料不能擅自锁定型号。"""
+    if len(product_tags) != 1:
         return None
+    product = product_tags[0]
     p_lower = product.lower()
+    if "手表" in product:
+        return "硅基手表"
+    if "健康app" in p_lower:
+        return "硅基动感健康APP"
     if "dexcom" in p_lower or "g7" in p_lower:
         return "Dexcom G7"
     if "libre" in p_lower or "freestyle" in p_lower:
@@ -327,6 +333,16 @@ def _resolve_topic(message: str, existing: str | None, rag_service: RagService) 
     """
     lowered = message.lower()
     topics = {
+        "gs1 pro": "GS1 Pro",
+        "gs1": "GS1",
+        "gs3": "GS3",
+        "eco": "ECO",
+        "metatwin": "MetaTwin",
+        "ks3": "KS3",
+        "硅基手表": "硅基手表",
+        "手表": "硅基手表",
+        "硅基动感健康app": "硅基动感健康APP",
+        "健康app": "硅基动感健康APP",
         "dexcom": "Dexcom G7",
         "g7": "Dexcom G7",
         "libre": "FreeStyle Libre",
@@ -351,7 +367,7 @@ def _resolve_topic(message: str, existing: str | None, rag_service: RagService) 
 
     top_hit = unbiased_hits[0]
     score = top_hit.final_score if top_hit.final_score is not None else top_hit.score
-    mapped_product = _map_product_to_topic(top_hit.product)
+    mapped_product = _map_product_tags_to_topic(top_hit.product_tags)
 
     # 如果检索到的最相关文档的分数很高，且产品清晰且不同于当前话题
     if score >= 0.5 and mapped_product and mapped_product != existing:

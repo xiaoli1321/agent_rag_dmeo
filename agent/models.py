@@ -30,7 +30,7 @@ class RetrievedDoc(BaseModel):
     source_url: str
     chunk_text: str
     score: float
-    product: str | None = None
+    product_tags: list[str] = Field(default_factory=list)
     vector_score: float | None = None
     sparse_score: float | None = None
     final_score: float | None = None

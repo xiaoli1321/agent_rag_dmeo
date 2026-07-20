@@ -17,7 +17,8 @@ def test_load_clean_split_sources_have_required_payload_metadata() -> None:
     assert "source_type" not in first.metadata
     assert "language" not in first.metadata
     assert first.metadata["chunk_id"]
-    assert set(first.metadata) == {"chunk_id", "source_title", "source_url", "product"}
+    assert set(first.metadata) == {"chunk_id", "source_title", "source_url", "product_tags"}
+    assert first.metadata["product_tags"] == ["MetaTwin", "GS1 Pro", "KS3"]
 
 
 def test_structural_chunking_strategy_keeps_section_metadata() -> None:

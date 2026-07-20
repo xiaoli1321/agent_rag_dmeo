@@ -16,7 +16,7 @@ DEFAULT_SOURCES_PATH = DEMO_ROOT / "data" / "cgm_sources.json"
 class SourceDocument:
     source_title: str
     source_url: str
-    product: str
+    product_tags: list[str]
     text: str
 
 
@@ -33,7 +33,7 @@ def load_sources(path: Path = DEFAULT_SOURCES_PATH) -> list[SourceDocument]:
         SourceDocument(
             source_title=record["source_title"],
             source_url=record["source_url"],
-            product=record["product"],
+            product_tags=_normalize_product_tags(record.get("product_tags", record.get("product"))),
             text=record["text"],
         )
         for record in records
@@ -53,7 +53,7 @@ def clean_documents(sources: list[SourceDocument]) -> list[CleanDocument]:
                 metadata={
                     "source_title": source.source_title,
                     "source_url": source.source_url,
-                    "product": source.product,
+                    "product_tags": source.product_tags,
                 },
             )
         )
@@ -108,7 +108,7 @@ def split_documents(
             "chunk_id": _stable_chunk_id(source_url, index, chunk.page_content),
             "source_title": chunk.metadata["source_title"],
             "source_url": source_url,
-            "product": chunk.metadata.get("product"),
+            "product_tags": chunk.metadata.get("product_tags") or [],
         }
         enriched.append(Document(page_content=chunk.page_content, metadata=metadata))
     return enriched
@@ -152,7 +152,7 @@ def _split_with_app_chunking(
             "chunk_id": _stable_chunk_id(source_url, index, payload.chunk_text),
             "source_title": payload.metadata_json["source_title"],
             "source_url": source_url,
-            "product": payload.metadata_json.get("product"),
+            "product_tags": payload.metadata_json.get("product_tags") or [],
         }
         # 仅父子分块需要额外保留父块：子块用于召回，父块用于回答。
         if strategy == "parent-child" and payload.context_text:
@@ -189,6 +189,7 @@ def upsert_to_qdrant(chunks: list[Any], settings: DemoSettings) -> None:
     try:
         from langchain_qdrant import QdrantVectorStore
         from qdrant_client import QdrantClient
+        from qdrant_client.models import PayloadSchemaType
     except ImportError as exc:  # pragma: no cover - environment guard
         raise RuntimeError(
             "Install qdrant-client and langchain-qdrant from requirements.txt."
@@ -207,8 +208,25 @@ def upsert_to_qdrant(chunks: list[Any], settings: DemoSettings) -> None:
         ids=[chunk.metadata["chunk_id"] for chunk in chunks],
         batch_size=10,
     )
+    client.create_payload_index(
+        collection_name=settings.qdrant_collection,
+        field_name="metadata.product_tags",
+        field_schema=PayloadSchemaType.KEYWORD,
+        wait=True,
+    )
 
 
 def _stable_chunk_id(source_url: str, index: int, text: str) -> str:
     raw = f"{source_url}|{index}|{text}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
+
+
+def _normalize_product_tags(value: Any) -> list[str]:
+    """接受新数组字段，并兼容历史单值 product 记录。"""
+    raw_tags = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+    tags: list[str] = []
+    for item in raw_tags:
+        tag = str(item).strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
