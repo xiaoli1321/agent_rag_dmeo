@@ -147,7 +147,6 @@ class CustomerAgent:
             "active_agent": "empathy_agent",
             "answer": answer,
             "messages": [AIMessage(content=answer)],
-            "attempted_answers": [answer],
             "handoff_reason": "用户情绪愤怒，需要先安抚。" if "投诉" in user_message else None,
         }
         if perception.handoff_requested or perception.intent == "售后诉求" or perception.emotion == "愤怒":
@@ -186,11 +185,9 @@ class CustomerAgent:
             "answer": result.answer,
             "answer_status": result.answer_status,
             "retrieved_docs": result.retrieved_docs,
-            "evidence_decision": result.evidence_decision,
             "debug_trace": result.debug_trace,
             "failed_rag_count": failed_count,
             "messages": [AIMessage(content=result.answer)],
-            "attempted_answers": [result.answer],
         }
         if result.answer_status == "insufficient_evidence" and failed_count >= 2:
             # 同一 threadId 内连续两次 RAG 找不到依据 → 由产品咨询 Agent 主动转人工
@@ -202,7 +199,7 @@ class CustomerAgent:
     def _smalltalk(self, state: AgentState) -> AgentState:
         """【闲聊节点】：简单的问候回复，不调用 RAG"""
         answer = "你好，我可以帮你解答 CGM 动态血糖仪的产品、佩戴、读数和常见使用问题。"
-        return {"answer": answer, "messages": [AIMessage(content=answer)], "attempted_answers": [answer]}
+        return {"answer": answer, "messages": [AIMessage(content=answer)]}
 
     def _after_sales(self, state: AgentState) -> AgentState:
         """
@@ -249,12 +246,16 @@ def build_handoff_summary(state: AgentState, *, reason: str) -> str:
     - 建议坐席下一步操作
     """
     user_messages = [_message_to_text(message) for message in state.get("messages", []) if isinstance(message, HumanMessage)]
-    attempted = state.get("attempted_answers", [])
+    attempted = [
+        _message_to_text(message)
+        for message in state.get("messages", [])
+        if isinstance(message, AIMessage)
+    ]
     docs = state.get("retrieved_docs", [])
     perception = state.get("perception")
     emotion = perception.emotion if perception else "未知"
     intent = perception.intent if perception else "未知"
-    sources = ", ".join(f"{doc.source_title} chunk #{doc.chunk_index}" for doc in docs[:3]) or "无有效命中"
+    sources = ", ".join(doc.source_title for doc in docs[:3]) or "无有效命中"
     return (
         "会话交接摘要：\n"
         f"- 用户问题：{' / '.join(user_messages[-3:]) or '未记录'}\n"

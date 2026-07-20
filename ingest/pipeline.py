@@ -12,14 +12,10 @@ from customer_agent_demo.config import DEMO_ROOT, DemoSettings
 
 
 DEFAULT_SOURCES_PATH = DEMO_ROOT / "data" / "cgm_sources.json"
-
-
 @dataclass(slots=True)
 class SourceDocument:
     source_title: str
     source_url: str
-    source_type: str
-    language: str
     product: str
     text: str
 
@@ -37,8 +33,6 @@ def load_sources(path: Path = DEFAULT_SOURCES_PATH) -> list[SourceDocument]:
         SourceDocument(
             source_title=record["source_title"],
             source_url=record["source_url"],
-            source_type=record["source_type"],
-            language=record["language"],
             product=record["product"],
             text=record["text"],
         )
@@ -59,8 +53,6 @@ def clean_documents(sources: list[SourceDocument]) -> list[CleanDocument]:
                 metadata={
                     "source_title": source.source_title,
                     "source_url": source.source_url,
-                    "source_type": source.source_type,
-                    "language": source.language,
                     "product": source.product,
                 },
             )
@@ -113,11 +105,10 @@ def split_documents(
         index = counters.get(source_url, 0)
         counters[source_url] = index + 1
         metadata = {
-            **chunk.metadata,
-            "chunking_strategy": "recursive",
-            "chunk_index": index,
             "chunk_id": _stable_chunk_id(source_url, index, chunk.page_content),
-            "chunk_text": chunk.page_content,
+            "source_title": chunk.metadata["source_title"],
+            "source_url": source_url,
+            "product": chunk.metadata.get("product"),
         }
         enriched.append(Document(page_content=chunk.page_content, metadata=metadata))
     return enriched
@@ -157,25 +148,14 @@ def _split_with_app_chunking(
         source_url = str(payload.metadata_json["source_url"])
         index = counters.get(source_url, 0)
         counters[source_url] = index + 1
-        page_content = payload.chunk_text
-        context_text = payload.context_text
-        if strategy == "parent-child" and context_text:
-            page_content = context_text
         metadata = {
-            **payload.metadata_json,
-            "chunking_strategy": strategy,
-            "chunk_index": index,
             "chunk_id": _stable_chunk_id(source_url, index, payload.chunk_text),
-            "chunk_text": page_content,
-            "embedded_chunk_text": payload.chunk_text,
+            "source_title": payload.metadata_json["source_title"],
+            "source_url": source_url,
+            "product": payload.metadata_json.get("product"),
         }
-        if payload.parent_chunk_uuid:
-            metadata["parent_chunk_uuid"] = payload.parent_chunk_uuid
-        if payload.chunk_group_uuid:
-            metadata["chunk_group_uuid"] = payload.chunk_group_uuid
-        if payload.chunk_level:
-            metadata["chunk_level"] = payload.chunk_level
-        if payload.context_text:
+        # 仅父子分块需要额外保留父块：子块用于召回，父块用于回答。
+        if strategy == "parent-child" and payload.context_text:
             metadata["context_text"] = payload.context_text
         enriched.append(Document(page_content=payload.chunk_text, metadata=metadata))
     return enriched

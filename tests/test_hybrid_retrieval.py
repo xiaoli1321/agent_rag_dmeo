@@ -88,17 +88,16 @@ def test_rag_service_hybrid_uses_sparse_when_dense_unavailable() -> None:
 
 def test_dense_docs_to_hits_uses_stable_chunk_identity() -> None:
     doc = _doc("Dexcom G7 FAQ", "https://example.com", "text", score=0.9)
+    doc.chunk_id = "stable-id"
 
     hits = dense_docs_to_hits([doc])
 
-    assert hits[0].chunk_id == "https://example.com#0"
+    assert hits[0].chunk_id == "stable-id"
 
 
 def test_local_sparse_docs_use_split_chunk_identity() -> None:
     docs = _load_local_docs()
 
     assert docs
-    assert any(doc.chunk_index > 0 for doc in docs)
-    first_source = docs[0].source_url
-    first_source_chunks = [doc.chunk_index for doc in docs if doc.source_url == first_source]
-    assert first_source_chunks == list(range(len(first_source_chunks)))
+    assert all(doc.chunk_id for doc in docs)
+    assert len({doc.chunk_id for doc in docs}) == len(docs)

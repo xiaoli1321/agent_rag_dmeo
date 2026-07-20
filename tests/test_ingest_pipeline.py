@@ -14,10 +14,10 @@ def test_load_clean_split_sources_have_required_payload_metadata() -> None:
     first = chunks[0]
     assert first.metadata["source_url"].startswith("https://")
     assert first.metadata["source_title"]
-    assert first.metadata["chunk_text"] == first.page_content
-    assert isinstance(first.metadata["chunk_index"], int)
+    assert "source_type" not in first.metadata
+    assert "language" not in first.metadata
     assert first.metadata["chunk_id"]
-    assert first.metadata["chunking_strategy"] == "recursive"
+    assert set(first.metadata) == {"chunk_id", "source_title", "source_url", "product"}
 
 
 def test_structural_chunking_strategy_keeps_section_metadata() -> None:
@@ -26,9 +26,8 @@ def test_structural_chunking_strategy_keeps_section_metadata() -> None:
     chunks = split_documents(cleaned, chunk_size=500, chunk_overlap=60, strategy="structural")
 
     assert chunks
-    assert all(chunk.metadata["chunking_strategy"] == "structural" for chunk in chunks)
-    assert all(chunk.metadata["chunk_text"] == chunk.page_content for chunk in chunks)
-    assert any(chunk.metadata.get("split_reason") for chunk in chunks)
+    assert all("chunk_text" not in chunk.metadata for chunk in chunks)
+    assert all("split_reason" not in chunk.metadata for chunk in chunks)
 
 
 def test_parent_child_chunking_strategy_embeds_child_with_parent_context() -> None:
@@ -38,8 +37,8 @@ def test_parent_child_chunking_strategy_embeds_child_with_parent_context() -> No
 
     assert chunks
     first = chunks[0]
-    assert first.metadata["chunking_strategy"] == "parent-child"
-    assert first.metadata["chunk_level"] == "child"
-    assert first.metadata["embedded_chunk_text"] == first.page_content
-    assert first.metadata["context_text"]
-    assert first.metadata["chunk_text"] == first.metadata["context_text"]
+    assert "chunk_level" not in first.metadata
+    assert "embedded_chunk_text" not in first.metadata
+    assert first.metadata.get("context_text")
+    assert len(first.metadata["context_text"]) >= len(first.page_content)
+    assert first.metadata["chunk_id"]

@@ -135,7 +135,7 @@ def test_retrieved_sources_are_deduped_by_source_url() -> None:
     references = format_references(docs)
 
     assert [doc.source_title for doc in deduped] == ["ECO产品介绍-旧", "GS3-佩戴体验"]
-    assert deduped[0].chunk_index == 3
+    assert deduped[0].chunk_text == "高分片段"
     assert references.count("ECO产品介绍-旧") == 1
 
 

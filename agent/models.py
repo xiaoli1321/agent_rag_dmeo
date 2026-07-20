@@ -25,9 +25,9 @@ class PerceptionResult(BaseModel):
 
 
 class RetrievedDoc(BaseModel):
+    chunk_id: str | None = None
     source_title: str
     source_url: str
-    chunk_index: int
     chunk_text: str
     score: float
     product: str | None = None
@@ -50,7 +50,6 @@ FailureType = Literal["knowledge_missing", "retrieval_mismatch", "hallucination"
 class DocumentGrade(BaseModel):
     source_title: str
     source_url: str
-    chunk_index: int
     binary_score: Literal["yes", "no"]
     reason: str
     failure_type: FailureType | None = None
@@ -104,11 +103,9 @@ class AgentState(TypedDict, total=False):
     active_agent: ActiveAgent
     current_topic: str | None
     retrieved_docs: list[RetrievedDoc]
-    evidence_decision: EvidenceDecision
     debug_trace: dict[str, Any]
     answer: str
     answer_status: str
     failed_rag_count: int
     handoff_reason: str | None
     handoff_summary: str | None
-    attempted_answers: list[str]

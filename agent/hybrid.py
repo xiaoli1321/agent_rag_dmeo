@@ -132,7 +132,7 @@ class LocalSparseRetriever:
                 idf = math.log((1 + total_docs) / (1 + self.doc_freq.get(token, 0))) + 1
                 score += tf * idf
             if score > 0:
-                chunk_id = f"{doc.source_url}#{doc.chunk_index}"
+                chunk_id = doc.chunk_id or doc.source_url
                 hits.append(SparseHit(chunk_id=chunk_id, score=round(score, 6), doc=doc))
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[:top_k]
@@ -141,7 +141,7 @@ class LocalSparseRetriever:
 def dense_docs_to_hits(docs: list[RetrievedDoc]) -> list[DenseHit]:
     return [
         DenseHit(
-            chunk_id=f"{doc.source_url}#{doc.chunk_index}",
+            chunk_id=doc.chunk_id or doc.source_url,
             score=doc.score,
             doc=doc,
         )
@@ -185,10 +185,10 @@ def _load_local_docs() -> list[RetrievedDoc]:
         metadata = chunk.metadata
         docs.append(
             RetrievedDoc(
+                chunk_id=str(metadata.get("chunk_id") or ""),
                 source_title=metadata["source_title"],
                 source_url=metadata["source_url"],
-                chunk_index=int(metadata["chunk_index"]),
-                chunk_text=str(metadata.get("chunk_text") or chunk.page_content),
+                chunk_text=str(metadata.get("context_text") or chunk.page_content),
                 score=0.0,
                 product=metadata.get("product"),
                 retrieval_source="sparse",
