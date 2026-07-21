@@ -16,6 +16,8 @@ from .rag import RagService
 from .run_logger import AgentRunLogger
 from ..config import DemoSettings, get_settings
 
+CONFIDENCE_THRESHOLD = 0.7
+MAX_CLARIFICATION_ROUNDS = 2
 
 # ── 类型别名 ──────────────────────────────────────────────
 # 感知函数签名：输入(用户消息, 历史消息列表)，输出感知结果
@@ -83,6 +85,7 @@ class CustomerAgent:
         graph.add_node("after_sales", self._after_sales)                    # 售后节点：转人工并生成交接摘要
         graph.add_node("empathy_agent", self._empathy_agent)                # 情绪安抚节点：先安抚再决定转给谁
         graph.add_node("smalltalk", self._smalltalk)                        # 闲聊节点：简单问候
+        graph.add_node("pending_clarification", self._pending_clarification)  # 追问节点：置信度低时澄清
 
         graph.add_edge(START, "perceive")                                   # 起点 → 感知
         graph.add_conditional_edges(                                        # 感知 → 按意图路由到不同 agent
@@ -93,12 +96,14 @@ class CustomerAgent:
                 "after_sales": "after_sales",
                 "empathy_agent": "empathy_agent",
                 "smalltalk": "smalltalk",
+                "pending_clarification": "pending_clarification",
             },
         )
         graph.add_edge("product_consultant", END)   # 产品咨询结束 → 结束
         graph.add_edge("after_sales", END)          # 售后结束 → 结束
         graph.add_edge("empathy_agent", END)        # 情绪安抚结束 → 结束
         graph.add_edge("smalltalk", END)            # 闲聊结束 → 结束
+        graph.add_edge("pending_clarification", END)  # 追问结束 → 结束
         return graph
 
     def draw_mermaid(self) -> str:
@@ -201,6 +206,32 @@ class CustomerAgent:
         answer = "你好，我可以帮你解答 CGM 动态血糖仪的产品、佩戴、读数和常见使用问题。"
         return {"answer": answer, "messages": [AIMessage(content=answer)]}
 
+    def _pending_clarification(self, state: AgentState) -> AgentState | Command:
+        """
+        【追问节点】：感知置信度低时输出追问话术。
+        先宽泛后具体，达到上限次数后转人工。
+        """
+        clarification_count = state.get("clarification_count", 0) + 1
+        if clarification_count >= MAX_CLARIFICATION_ROUNDS:
+            answer = "抱歉，我未能理解你的需求。已为你转人工处理。"
+            return {
+                "active_agent": "after_sales",
+                "answer": answer,
+                "messages": [AIMessage(content=answer)],
+                "handoff_reason": f"追问{MAX_CLARIFICATION_ROUNDS}次后仍无法确定用户意图",
+                "clarification_count": clarification_count,
+            }
+        questions = {
+            1: "请问你想了解产品功能、使用问题，还是需要售后服务？",
+        }
+        answer = questions.get(clarification_count, "可以换个说法描述你的问题吗？")
+        return {
+            "active_agent": "pending_clarification",
+            "answer": answer,
+            "messages": [AIMessage(content=answer)],
+            "clarification_count": clarification_count,
+        }
+
     def _after_sales(self, state: AgentState) -> AgentState:
         """
         【售后节点】：
@@ -225,12 +256,16 @@ class CustomerAgent:
 
         逻辑：
         - 如果感知到意图是"闲聊" → 走 smalltalk
+        - 如果 active_agent 是 pending_clarification → 走 pending_clarification
         - 否则根据感知阶段选定的 active_agent 路由
         """
         perception = state.get("perception")
         if perception and perception.intent == "闲聊":
             return "smalltalk"
-        return state.get("active_agent") or "product_consultant"
+        agent = state.get("active_agent")
+        if agent == "pending_clarification":
+            return "pending_clarification"
+        return agent or "product_consultant"
 
 
 def build_handoff_summary(state: AgentState, *, reason: str) -> str:
@@ -393,6 +428,7 @@ def _select_active_agent(perception: PerceptionResult, existing: ActiveAgent | N
     根据感知结果选择应该激活哪个 agent。
 
     优先级（高→低）：
+    0. 置信度低于阈值 → pending_clarification（追问澄清）
     1. 情绪愤怒 → empathy_agent（先安抚）
     2. 要求人工或售后诉求 → after_sales（转人工）
     3. 特殊路由：如果当前在 after_sales，但用户问的是普通产品/使用问题且未要求人工 → 转回 product_consultant
@@ -400,6 +436,9 @@ def _select_active_agent(perception: PerceptionResult, existing: ActiveAgent | N
     5. 产品咨询或使用问题 → product_consultant（RAG 检索）
     6. 兜底 → product_consultant
     """
+    # 置信度低于阈值时触发追问流程
+    if perception.confidence < CONFIDENCE_THRESHOLD:
+        return "pending_clarification"
     if perception.emotion == "愤怒":
         return "empathy_agent"
     if perception.handoff_requested or perception.intent == "售后诉求":

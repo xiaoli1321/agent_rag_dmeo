@@ -11,9 +11,9 @@ except ImportError:  # pragma: no cover - dependency guard for pure model tests
         return list(left or []) + list(right or [])
 
 
-Intent = Literal["产品咨询", "使用问题", "售后诉求", "闲聊"]
+Intent = Literal["产品咨询", "使用问题", "售后诉求", "闲聊", "待澄清"]
 Emotion = Literal["平静", "不满", "愤怒"]
-ActiveAgent = Literal["product_consultant", "after_sales", "empathy_agent"]
+ActiveAgent = Literal["product_consultant", "after_sales", "empathy_agent", "pending_clarification"]
 
 
 class PerceptionResult(BaseModel):
@@ -109,3 +109,4 @@ class AgentState(TypedDict, total=False):
     failed_rag_count: int
     handoff_reason: str | None
     handoff_summary: str | None
+    clarification_count: int
