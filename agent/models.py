@@ -103,10 +103,6 @@ class AgentState(TypedDict, total=False):
     active_agent: ActiveAgent
     current_topic: str | None
     retrieved_docs: list[RetrievedDoc]
-    debug_trace: dict[str, Any]
-    answer: str
-    answer_status: str
     failed_rag_count: int
     handoff_reason: str | None
-    handoff_summary: str | None
     clarification_count: int

@@ -122,7 +122,7 @@ class CustomerAgent:
         history = [_message_to_text(message) for message in state.get("messages", [])[:-1]]
         classify = self.perception_fn or self.perception_service.classify
         perception = classify(user_message, history)
-        topic = _resolve_topic(user_message, state.get("current_topic"), self.rag_service)
+        topic = _resolve_topic(user_message, state.get("current_topic"))
         active_agent = _select_active_agent(perception, state.get("active_agent"))
         update: dict = {"perception": perception, "current_topic": topic, "active_agent": active_agent}
         # 如果退出澄清状态，重置计数器
@@ -154,7 +154,6 @@ class CustomerAgent:
             answer += " 你已经明确要求人工，我会整理交接摘要。"
         update = {
             "active_agent": "empathy_agent",
-            "answer": answer,
             "messages": [AIMessage(content=answer)],
             "handoff_reason": "用户情绪愤怒，需要先安抚。" if "投诉" in user_message else None,
         }
@@ -180,21 +179,21 @@ class CustomerAgent:
         - 成功回答 → 重置 failed_count 为 0
         """
         user_message = _last_human_message(state["messages"])
+        # 先解析话题（含 RAG 匹配），更新 current_topic
+        topic = _resolve_topic_with_rag(user_message, state.get("current_topic"), self.rag_service)
         if self.rag_fn is not None:
-            result = self.rag_fn(user_message, state.get("current_topic"))
+            result = self.rag_fn(user_message, topic)
         else:
-            result = self.rag_service.answer(user_message, topic_hint=state.get("current_topic"))
+            result = self.rag_service.answer(user_message, topic_hint=topic)
         failed_count = state.get("failed_rag_count", 0)
         if result.answer_status == "insufficient_evidence":
             failed_count += 1
         else:
             failed_count = 0
+        # 正常路径（goto END）不携带 retrieved_docs, answer, answer_status, debug_trace
         update = {
             "active_agent": "product_consultant",
-            "answer": result.answer,
-            "answer_status": result.answer_status,
-            "retrieved_docs": result.retrieved_docs,
-            "debug_trace": result.debug_trace,
+            "current_topic": topic,
             "failed_rag_count": failed_count,
             "messages": [AIMessage(content=result.answer)],
         }
@@ -202,13 +201,14 @@ class CustomerAgent:
             # 同一 threadId 内连续两次 RAG 找不到依据 → 由产品咨询 Agent 主动转人工
             update["active_agent"] = "after_sales"
             update["handoff_reason"] = "RAG 连续两次未找到足够依据，产品咨询 Agent 主动转交售后/人工。"
+            update["retrieved_docs"] = result.retrieved_docs  # 只在 handoff 时携带 retrieved_docs
             return Command(goto="after_sales", update=update)
         return update
 
     def _smalltalk(self, state: AgentState) -> AgentState:
         """【闲聊节点】：简单的问候回复，不调用 RAG"""
         answer = "你好，我可以帮你解答 CGM 动态血糖仪的产品、佩戴、读数和常见使用问题。"
-        return {"answer": answer, "messages": [AIMessage(content=answer)]}
+        return {"messages": [AIMessage(content=answer)]}
 
     def _pending_clarification(self, state: AgentState) -> AgentState | Command:
         """
@@ -220,7 +220,6 @@ class CustomerAgent:
             answer = "抱歉，我未能理解你的需求。已为你转人工处理。"
             return {
                 "active_agent": "after_sales",
-                "answer": answer,
                 "messages": [AIMessage(content=answer)],
                 "handoff_reason": f"追问{MAX_CLARIFICATION_ROUNDS}次后仍无法确定用户意图",
                 "clarification_count": clarification_count,
@@ -232,7 +231,6 @@ class CustomerAgent:
         answer = questions.get(clarification_count, "可以换个说法描述你的问题吗？")
         return {
             "active_agent": "pending_clarification",
-            "answer": answer,
             "messages": [AIMessage(content=answer)],
             "clarification_count": clarification_count,
         }
@@ -248,9 +246,7 @@ class CustomerAgent:
         answer = f"已为你转人工。\n\n{summary}"
         return {
             "active_agent": "after_sales",
-            "answer": answer,
             "handoff_reason": reason,
-            "handoff_summary": summary,
             "messages": [AIMessage(content=answer)],
         }
 
@@ -364,13 +360,12 @@ def _map_product_tags_to_topic(product_tags: list[str]) -> str | None:
     return product
 
 
-def _resolve_topic(message: str, existing: str | None, rag_service: RagService) -> str | None:
+def _resolve_topic(message: str, existing: str | None) -> str | None:
     """
-    从用户消息中识别产品话题（通过关键词匹配和 RAG 动态匹配相结合）。
+    纯关键词匹配版本，不调用 RAG。
 
-    - 优先显式匹配品牌/型号关键词。
-    - 若没有显式匹配，利用 RAG 的无偏检索匹配相关产品。
-      如果无偏检索到的文档相关度很高，并且优于在当前锁定话题下的检索评分，则进行话题转移。
+    从用户消息中通过品牌/型号关键词识别产品话题。
+    如果没有关键词匹配且当前无话题，返回 None（不清除 existing，避免代词指代丢失）。
     """
     lowered = message.lower()
     topics = {
@@ -394,14 +389,27 @@ def _resolve_topic(message: str, existing: str | None, rag_service: RagService) 
         if keyword in lowered or keyword in message:
             return topic
 
-    # 如果当前没有锁定的话题，且消息中包含指示代词（如“它”、“这个”、“那个”等），则不能盲目通过 RAG 匹配出新话题
-    # 因为在没有前文时，“它”是没有指代对象的，强行匹配容易造成幻觉和意图污染
+    # 如果当前没有锁定的话题，且消息中包含指示代词，不能强行匹配
     if not existing:
         pronouns = {"它", "这个", "那个", "这", "其", "该"}
         if any(p in message for p in pronouns):
             return None
 
-    # RAG 动力路径：通过无前缀的检索寻找强匹配的产品
+    return existing
+
+
+def _resolve_topic_with_rag(message: str, existing: str | None, rag_service: RagService) -> str | None:
+    """
+    完整版话题解析：先走关键词匹配，若没命中则通过 RAG 无偏检索匹配产品。
+
+    在 _product_consultant 中调用，替代 _perceive 中原本的 RAG 调用。
+    """
+    # 先尝试纯关键词匹配
+    result = _resolve_topic(message, existing)
+    if result != existing:
+        return result
+
+    # 关键词未命中新话题，走 RAG 动力路径
     unbiased_hits = rag_service.retrieve(message, topic_hint=None)
     if not unbiased_hits:
         return existing
@@ -410,7 +418,6 @@ def _resolve_topic(message: str, existing: str | None, rag_service: RagService) 
     score = top_hit.final_score if top_hit.final_score is not None else top_hit.score
     mapped_product = _map_product_tags_to_topic(top_hit.product_tags)
 
-    # 如果检索到的最相关文档的分数很高，且产品清晰且不同于当前话题
     if score >= 0.5 and mapped_product and mapped_product != existing:
         if not existing:
             return mapped_product
@@ -422,7 +429,6 @@ def _resolve_topic(message: str, existing: str | None, rag_service: RagService) 
             b_hit = biased_hits[0]
             biased_score = b_hit.final_score if b_hit.final_score is not None else b_hit.score
 
-        # 如果无偏匹配度大幅优于锁定话题的匹配度，或者锁定话题匹配度过低（低于阈值 0.35）
         if biased_score < 0.35 or score > biased_score + 0.15:
             return mapped_product
 

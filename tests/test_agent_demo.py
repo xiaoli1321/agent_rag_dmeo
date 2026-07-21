@@ -86,11 +86,9 @@ def test_product_question_routes_to_rag() -> None:
 
     result = agent.invoke("Dexcom G7 可以戴着洗澡吗？", thread_id="product-route")
 
-    assert result["answer_status"] == "grounded"
     assert result["active_agent"] == "product_consultant"
-    assert result["debug_trace"]["evidence_reason"] == "test"
-    assert "引用：" in result["answer"]
-    assert result["retrieved_docs"][0].source_title == "Dexcom G7 FAQ"
+    assert "引用：" in result["messages"][-1].content
+    # 正常路径不携带 retrieved_docs, answer, answer_status, debug_trace
 
 
 def test_angry_message_routes_to_empathy_then_handoff() -> None:
@@ -101,10 +99,10 @@ def test_angry_message_routes_to_empathy_then_handoff() -> None:
 
     result = agent.invoke("太差了，我要投诉，转人工！", thread_id="angry-route")
 
-    assert "已为你转人工" in result["answer"]
+    assert "已为你转人工" in result["messages"][-1].content
     assert result["active_agent"] == "after_sales"
-    assert "会话交接摘要" in result["handoff_summary"]
     assert result["perception"].emotion == "愤怒"
+    # handoff_summary 不再写入状态，可通过 messages[-1].content 获取摘要信息
 
 
 def test_active_handoff_routes_directly_to_handoff() -> None:
@@ -115,7 +113,7 @@ def test_active_handoff_routes_directly_to_handoff() -> None:
 
     result = agent.invoke("我要人工处理退款", thread_id="direct-handoff")
 
-    assert "已为你转人工" in result["answer"]
+    assert "已为你转人工" in result["messages"][-1].content
     assert result["active_agent"] == "after_sales"
     assert "用户主动要求人工" in result["handoff_reason"]
 
@@ -127,13 +125,15 @@ def test_two_rag_failures_trigger_product_to_after_sales_handoff() -> None:
     first = agent.invoke("连接码是几位数？", thread_id=thread_id)
     second = agent.invoke("那有效期是多少天？", thread_id=thread_id)
 
-    assert first["answer_status"] == "insufficient_evidence"
     assert first["active_agent"] == "product_consultant"
     assert first["failed_rag_count"] == 1
-    assert "已为你转人工" in second["answer"]
+    # 正常路径 answer_status 不再写入状态，但 failed_rag_count 反映证据不足
+    assert "已为你转人工" in second["messages"][-1].content
     assert second["active_agent"] == "after_sales"
     assert second["failed_rag_count"] == 2
     assert "RAG 连续两次未找到足够依据" in second["handoff_reason"]
+    # handoff 路径携带 retrieved_docs
+    assert second["retrieved_docs"] == []
 
 
 def test_thread_id_isolates_agent_state() -> None:
@@ -176,7 +176,7 @@ def test_low_confidence_routes_to_pending_clarification() -> None:
     )
     result = agent.invoke("那个……", thread_id="clarify-route")
     assert result["active_agent"] == "pending_clarification"
-    assert "请问你想了解" in result["answer"]
+    assert "请问你想了解" in result["messages"][-1].content
 
 
 def test_clarification_exits_when_confidence_improves() -> None:
@@ -205,4 +205,4 @@ def test_clarification_exceeds_max_rounds_triggers_handoff() -> None:
     second = agent.invoke("就是那个……", thread_id=thread_id)
     third = agent.invoke("……", thread_id=thread_id)
     # 第三次应转人工
-    assert "已为你转人工" in third["answer"] or "抱歉" in third["answer"]
+    assert "已为你转人工" in third["messages"][-1].content or "抱歉" in third["messages"][-1].content

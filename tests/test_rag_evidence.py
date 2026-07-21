@@ -237,7 +237,7 @@ def test_llm_refusal_after_grounded_retrieval_keeps_retrieved_docs() -> None:
 
 
 def test_resolve_topic_handles_watch_and_patch() -> None:
-    from ..agent.graph import _resolve_topic
+    from ..agent.graph import _resolve_topic, _resolve_topic_with_rag
 
     class MockRagService(RagService):
         def retrieve(self, question: str, topic_hint: str | None = None) -> list[RetrievedDoc]:
@@ -250,10 +250,12 @@ def test_resolve_topic_handles_watch_and_patch() -> None:
             return []
 
     service = MockRagService(settings=_test_settings())
-    assert _resolve_topic("手表什么时候上线", None, service) == "硅基手表"
-    assert _resolve_topic("watch functions", None, service) == "硅基手表"
-    assert _resolve_topic("硅基加固贴尺寸", None, service) == "硅基动感 CGM"
-    assert _resolve_topic("加固贴", "Dexcom G7", service) == "硅基手表"
+    # 纯关键词匹配（不再调 RAG）
+    assert _resolve_topic("手表什么时候上线", None) == "硅基手表"
+    assert _resolve_topic("watch functions", None) is None  # 无中文关键词，返回 None
+    assert _resolve_topic("硅基加固贴尺寸", None) == "硅基动感 CGM"
+    # 带 RAG 的完整匹配
+    assert _resolve_topic_with_rag("加固贴", "Dexcom G7", service) == "硅基手表"
 
 
 def test_keyword_overlap_robustness() -> None:
