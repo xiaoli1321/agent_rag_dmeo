@@ -11,12 +11,13 @@ def _perception(
     intent: str = "产品咨询",
     emotion: str = "平静",
     handoff_requested: bool = False,
+    confidence: float = 0.99,
 ):
     def classify(message: str, history: list[str]) -> PerceptionResult:
         return PerceptionResult(
             intent=intent,  # type: ignore[arg-type]
             emotion=emotion,  # type: ignore[arg-type]
-            confidence=0.99,
+            confidence=confidence,
             handoff_requested=handoff_requested,
             reason=f"test route for {message}",
         )
@@ -165,3 +166,43 @@ def test_multiturn_topic_keeps_previous_product_reference() -> None:
     agent.invoke("它防水吗？", thread_id=thread_id)
 
     assert seen_topics == ["Dexcom G7", "Dexcom G7"]
+
+
+def test_low_confidence_routes_to_pending_clarification() -> None:
+    """低置信度 → 路由到 pending_clarification"""
+    agent = CustomerAgent(
+        perception_fn=_perception(intent="产品咨询", confidence=0.45),
+        rag_fn=_grounded_rag,
+    )
+    result = agent.invoke("那个……", thread_id="clarify-route")
+    assert result["active_agent"] == "pending_clarification"
+    assert "请问你想了解" in result["answer"]
+
+
+def test_clarification_exits_when_confidence_improves() -> None:
+    """追问后用户清晰回答 → 退出澄清，走正常路由"""
+    agent = CustomerAgent(
+        perception_fn=_perception(intent="产品咨询", confidence=0.95),
+        rag_fn=_grounded_rag,
+    )
+    thread_id = "clarify-exit"
+    # 先走一次低置信，触发澄清
+    agent.invoke("那个……", thread_id=thread_id)
+    # 第二轮清晰表达（使用高置信 mock）
+    result = agent.invoke("GS3防水吗", thread_id=thread_id)
+    assert result["active_agent"] == "product_consultant"
+    assert result.get("clarification_count", 0) == 0  # 已重置
+
+
+def test_clarification_exceeds_max_rounds_triggers_handoff() -> None:
+    """追问达上限后转人工"""
+    agent = CustomerAgent(
+        perception_fn=_perception(intent="产品咨询", confidence=0.45),
+        rag_fn=_grounded_rag,
+    )
+    thread_id = "clarify-handoff"
+    first = agent.invoke("那个……", thread_id=thread_id)
+    second = agent.invoke("就是那个……", thread_id=thread_id)
+    third = agent.invoke("……", thread_id=thread_id)
+    # 第三次应转人工
+    assert "已为你转人工" in third["answer"] or "抱歉" in third["answer"]

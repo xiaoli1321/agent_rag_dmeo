@@ -17,7 +17,7 @@ from .run_logger import AgentRunLogger
 from ..config import DemoSettings, get_settings
 
 CONFIDENCE_THRESHOLD = 0.7
-MAX_CLARIFICATION_ROUNDS = 2
+MAX_CLARIFICATION_ROUNDS = 3
 
 # ── 类型别名 ──────────────────────────────────────────────
 # 感知函数签名：输入(用户消息, 历史消息列表)，输出感知结果
@@ -124,7 +124,11 @@ class CustomerAgent:
         perception = classify(user_message, history)
         topic = _resolve_topic(user_message, state.get("current_topic"), self.rag_service)
         active_agent = _select_active_agent(perception, state.get("active_agent"))
-        return {"perception": perception, "current_topic": topic, "active_agent": active_agent}
+        update: dict = {"perception": perception, "current_topic": topic, "active_agent": active_agent}
+        # 如果退出澄清状态，重置计数器
+        if active_agent != "pending_clarification":
+            update["clarification_count"] = 0
+        return update
 
     def _empathy_agent(self, state: AgentState) -> Command:
         """
@@ -223,6 +227,7 @@ class CustomerAgent:
             }
         questions = {
             1: "请问你想了解产品功能、使用问题，还是需要售后服务？",
+            2: "你可以告诉我具体的设备型号（如GS3、硅基手表）或遇到的问题，我来帮你查询。",
         }
         answer = questions.get(clarification_count, "可以换个说法描述你的问题吗？")
         return {
@@ -254,17 +259,18 @@ class CustomerAgent:
         """
         【感知后的路由】：决定感知节点之后应该去哪个 agent。
 
-        逻辑：
-        - 如果感知到意图是"闲聊" → 走 smalltalk
-        - 如果 active_agent 是 pending_clarification → 走 pending_clarification
+        逻辑（优先级从高到低）：
+        - active_agent 为 pending_clarification → 走 pending_clarification（置信度保护优先）
+        - 感知到意图是"闲聊" → 走 smalltalk
         - 否则根据感知阶段选定的 active_agent 路由
         """
+        agent = state.get("active_agent")
+        # 置信度保护优先于意图判断
+        if agent == "pending_clarification":
+            return "pending_clarification"
         perception = state.get("perception")
         if perception and perception.intent == "闲聊":
             return "smalltalk"
-        agent = state.get("active_agent")
-        if agent == "pending_clarification":
-            return "pending_clarification"
         return agent or "product_consultant"
 
 
@@ -445,7 +451,7 @@ def _select_active_agent(perception: PerceptionResult, existing: ActiveAgent | N
         return "after_sales"
     if existing == "after_sales" and perception.intent in {"产品咨询", "使用问题"}:
         return "product_consultant"
-    if existing is not None:
+    if existing is not None and existing != "pending_clarification":
         return existing
     if perception.intent in {"产品咨询", "使用问题"}:
         return "product_consultant"

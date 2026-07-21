@@ -11,7 +11,7 @@ except ImportError:  # pragma: no cover - dependency guard for pure model tests
         return list(left or []) + list(right or [])
 
 
-Intent = Literal["产品咨询", "使用问题", "售后诉求", "闲聊", "待澄清"]
+Intent = Literal["产品咨询", "使用问题", "售后诉求", "闲聊"]
 Emotion = Literal["平静", "不满", "愤怒"]
 ActiveAgent = Literal["product_consultant", "after_sales", "empathy_agent", "pending_clarification"]
 
