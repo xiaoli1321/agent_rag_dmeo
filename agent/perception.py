@@ -51,7 +51,10 @@ def heuristic_perception(message: str) -> PerceptionResult:
     """Deterministic fallback for local tests and missing model config."""
     text = message.lower()
     handoff_words = ("人工", "客服", "坐席", "投诉", "退款", "赔偿", "换货", "退货")
-    angry_words = ("太差", "垃圾", "投诉", "赔偿", "气死", "马上", "再也不用", "坏了")
+    # 情绪判定词表（只影响情绪，不影响意图）
+    angry_words = ("太差", "垃圾", "气死", "再也不用", "忍不了", "过分")
+    dissatisfied_words = ("没有用", "不行", "怎么回事", "烦", "服了", "无语")
+    # 意图判定词表（只影响意图，不影响情绪）
     aftersales_words = (
         "订单",
         "物流",
@@ -90,12 +93,15 @@ def heuristic_perception(message: str) -> PerceptionResult:
     )
 
     handoff = any(word in text for word in handoff_words)
-    emotion = "愤怒" if any(word in text for word in angry_words) else "平静"
-    if emotion == "平静" and any(
-        word in text for word in ("没有用", "不行", "怎么回事", "烦", "服了")
-    ):
+
+    # 情绪判定（只基于情绪词表，独立于意图）
+    emotion = "平静"
+    if any(word in text for word in angry_words):
+        emotion = "愤怒"
+    elif any(word in text for word in dissatisfied_words):
         emotion = "不满"
 
+    # 意图判定（只基于意图词表，不受情绪影响）
     if handoff or any(word in text for word in aftersales_words):
         intent = "售后诉求"
     elif any(word in text for word in usage_words):
