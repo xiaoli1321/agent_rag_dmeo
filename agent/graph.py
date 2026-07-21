@@ -5,7 +5,7 @@ from time import perf_counter
 from typing import Callable
 from uuid import uuid4
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
@@ -36,10 +36,13 @@ class CustomerAgent:
     - 对外暴露 invoke() 作为唯一入口
     - 自动记录每次对话的延迟和运行日志
     """
+
     settings: DemoSettings = field(default_factory=get_settings)
-    perception_fn: PerceptionFn | None = None      # 可注入的外部感知函数（方便测试时 mock）
-    rag_fn: RagFn | None = None                     # 可注入的外部 RAG 函数（方便测试时 mock）
-    checkpointer: InMemorySaver = field(default_factory=InMemorySaver)  # LangGraph 内存检查点，用于多轮对话状态管理
+    perception_fn: PerceptionFn | None = None  # 可注入的外部感知函数（方便测试时 mock）
+    rag_fn: RagFn | None = None  # 可注入的外部 RAG 函数（方便测试时 mock）
+    checkpointer: InMemorySaver = field(
+        default_factory=InMemorySaver
+    )  # LangGraph 内存检查点，用于多轮对话状态管理
 
     def __post_init__(self) -> None:
         """初始化各个服务组件并编译 LangGraph"""
@@ -57,11 +60,15 @@ class CustomerAgent:
 
         - thread_id: 对话线程 ID，同一 ID 的多轮消息共享上下文
         - 自动记录每次调用的延迟到运行日志
+        - 返回的 state dict 在转人工场景中包含 `handoff_summary` 字段，
+          调用方可通过 ``result.get("handoff_summary")`` 获取坐席交接摘要
         """
         resolved_thread_id = thread_id or "demo-thread"
         config = {"configurable": {"thread_id": resolved_thread_id}}
         started = perf_counter()
-        result = self.graph.invoke({"messages": [HumanMessage(content=user_message)]}, config=config)
+        result = self.graph.invoke(
+            {"messages": [HumanMessage(content=user_message)]}, config=config
+        )
         latency_ms = int((perf_counter() - started) * 1000)
         self.run_logger.log_turn(
             thread_id=resolved_thread_id,
@@ -80,15 +87,23 @@ class CustomerAgent:
         路由逻辑在 _active_agent_router 中决定下一步去哪。
         """
         graph = StateGraph(AgentState)
-        graph.add_node("perceive", self._perceive)                          # 感知节点：识别意图和情绪
-        graph.add_node("product_consultant", self._product_consultant)      # 产品咨询节点：RAG 检索+回答
-        graph.add_node("after_sales", self._after_sales)                    # 售后节点：转人工并生成交接摘要
-        graph.add_node("empathy_agent", self._empathy_agent)                # 情绪安抚节点：先安抚再决定转给谁
-        graph.add_node("smalltalk", self._smalltalk)                        # 闲聊节点：简单问候
-        graph.add_node("pending_clarification", self._pending_clarification)  # 追问节点：置信度低时澄清
+        graph.add_node("perceive", self._perceive)  # 感知节点：识别意图和情绪
+        graph.add_node(
+            "product_consultant", self._product_consultant
+        )  # 产品咨询节点：RAG 检索+回答
+        graph.add_node(
+            "after_sales", self._after_sales
+        )  # 售后节点：转人工并生成交接摘要
+        graph.add_node(
+            "empathy_agent", self._empathy_agent
+        )  # 情绪安抚节点：先安抚再决定转给谁
+        graph.add_node("smalltalk", self._smalltalk)  # 闲聊节点：简单问候
+        graph.add_node(
+            "pending_clarification", self._pending_clarification
+        )  # 追问节点：置信度低时澄清
 
-        graph.add_edge(START, "perceive")                                   # 起点 → 感知
-        graph.add_conditional_edges(                                        # 感知 → 按意图路由到不同 agent
+        graph.add_edge(START, "perceive")  # 起点 → 感知
+        graph.add_conditional_edges(  # 感知 → 按意图路由到不同 agent
             "perceive",
             self._active_agent_router,
             {
@@ -99,10 +114,10 @@ class CustomerAgent:
                 "pending_clarification": "pending_clarification",
             },
         )
-        graph.add_edge("product_consultant", END)   # 产品咨询结束 → 结束
-        graph.add_edge("after_sales", END)          # 售后结束 → 结束
-        graph.add_edge("empathy_agent", END)        # 情绪安抚结束 → 结束
-        graph.add_edge("smalltalk", END)            # 闲聊结束 → 结束
+        graph.add_edge("product_consultant", END)  # 产品咨询结束 → 结束
+        graph.add_edge("after_sales", END)  # 售后结束 → 结束
+        graph.add_edge("empathy_agent", END)  # 情绪安抚结束 → 结束
+        graph.add_edge("smalltalk", END)  # 闲聊结束 → 结束
         graph.add_edge("pending_clarification", END)  # 追问结束 → 结束
         return graph
 
@@ -119,12 +134,18 @@ class CustomerAgent:
         4. 根据感知结果决定当前应激活哪个 agent
         """
         user_message = _last_human_message(state["messages"])
-        history = [_message_to_text(message) for message in state.get("messages", [])[:-1]]
+        history = [
+            _message_to_text(message) for message in state.get("messages", [])[:-1]
+        ]
         classify = self.perception_fn or self.perception_service.classify
         perception = classify(user_message, history)
         topic = _resolve_topic(user_message, state.get("current_topic"))
         active_agent = _select_active_agent(perception, state.get("active_agent"))
-        update: dict = {"perception": perception, "current_topic": topic, "active_agent": active_agent}
+        update: dict = {
+            "perception": perception,
+            "current_topic": topic,
+            "active_agent": active_agent,
+        }
         # 如果退出澄清状态，重置计数器
         if active_agent != "pending_clarification":
             update["clarification_count"] = 0
@@ -155,11 +176,19 @@ class CustomerAgent:
         update = {
             "active_agent": "empathy_agent",
             "messages": [AIMessage(content=answer)],
-            "handoff_reason": "用户情绪愤怒，需要先安抚。" if "投诉" in user_message else None,
+            "handoff_reason": "用户情绪愤怒，需要先安抚。"
+            if "投诉" in user_message
+            else None,
         }
-        if perception.handoff_requested or perception.intent == "售后诉求" or perception.emotion == "愤怒":
+        if (
+            perception.handoff_requested
+            or perception.intent == "售后诉求"
+            or perception.emotion == "愤怒"
+        ):
             # 需要售后或人工的场景 → 跳转到 after_sales
-            update["handoff_reason"] = update["handoff_reason"] or "用户情绪愤怒，需要售后或人工接手。"
+            update["handoff_reason"] = (
+                update["handoff_reason"] or "用户情绪愤怒，需要售后或人工接手。"
+            )
             update["active_agent"] = "after_sales"
             return Command(goto="after_sales", update=update)
         if perception.intent in {"产品咨询", "使用问题"}:
@@ -180,7 +209,9 @@ class CustomerAgent:
         """
         user_message = _last_human_message(state["messages"])
         # 先解析话题（含 RAG 匹配），更新 current_topic
-        topic = _resolve_topic_with_rag(user_message, state.get("current_topic"), self.rag_service)
+        topic = _resolve_topic_with_rag(
+            user_message, state.get("current_topic"), self.rag_service
+        )
         if self.rag_fn is not None:
             result = self.rag_fn(user_message, topic)
         else:
@@ -200,8 +231,12 @@ class CustomerAgent:
         if result.answer_status == "insufficient_evidence" and failed_count >= 2:
             # 同一 threadId 内连续两次 RAG 找不到依据 → 由产品咨询 Agent 主动转人工
             update["active_agent"] = "after_sales"
-            update["handoff_reason"] = "RAG 连续两次未找到足够依据，产品咨询 Agent 主动转交售后/人工。"
-            update["retrieved_docs"] = result.retrieved_docs  # 只在 handoff 时携带 retrieved_docs
+            update["handoff_reason"] = (
+                "RAG 连续两次未找到足够依据，产品咨询 Agent 主动转交售后/人工。"
+            )
+            update["retrieved_docs"] = (
+                result.retrieved_docs
+            )  # 只在 handoff 时携带 retrieved_docs
             return Command(goto="after_sales", update=update)
         return update
 
@@ -240,13 +275,40 @@ class CustomerAgent:
         【售后节点】：
         生成转人工摘要，包含用户问题、意图/情绪、已尝试的回答、命中的知识库来源等，
         方便人工坐席快速接手。
+
+        两条输出分离：
+        - 给用户的简短回复（不包含详细摘要）
+        - 给坐席的交接摘要（写入 handoff_summary，供 invoke() 返回消费者使用）
         """
         reason = state.get("handoff_reason") or _default_handoff_reason(state)
-        summary = build_handoff_summary(state, reason=reason)
-        answer = f"已为你转人工。\n\n{summary}"
+
+        # 给用户的简短回复（不包含详细摘要）
+        answer = "已为你转人工。坐席将尽快联系你。"
+
+        # 给坐席的交接摘要（使用 LLM 或模板兜底）
+        try:
+            if self.settings.llm_configured:
+                from langchain_openai import ChatOpenAI
+
+                llm = ChatOpenAI(
+                    api_key=self.settings.llm_api_key,
+                    base_url=self.settings.llm_api_base,
+                    model=self.settings.llm_model,
+                    temperature=0.0,
+                    max_tokens=min(self.settings.llm_max_tokens, 500),
+                    extra_body=self.settings.llm_extra_body,
+                )
+                summary = build_handoff_summary(state, reason=reason, llm=llm)
+            else:
+                summary = build_handoff_summary(state, reason=reason)
+        except Exception:
+            # LLM 异常时回退模板
+            summary = build_handoff_summary(state, reason=reason)
+
         return {
             "active_agent": "after_sales",
             "handoff_reason": reason,
+            "handoff_summary": summary,  # 供 invoke() 返回消费者使用
             "messages": [AIMessage(content=answer)],
         }
 
@@ -270,19 +332,25 @@ class CustomerAgent:
         return agent or "product_consultant"
 
 
-def build_handoff_summary(state: AgentState, *, reason: str) -> str:
+def build_handoff_summary(state: AgentState, *, reason: str, llm=None) -> str:
     """
     构建转人工交接摘要。
 
-    包含：
-    - 用户最近的问题
-    - 当前意图和情绪
-    - 已尝试的回答
-    - 命中的知识库来源
-    - 未解决原因
-    - 建议坐席下一步操作
+    如果提供了 llm，使用 LLM 生成连贯叙事；
+    否则回退到模板拼接（维持向后兼容）。
     """
-    user_messages = [_message_to_text(message) for message in state.get("messages", []) if isinstance(message, HumanMessage)]
+    if llm is not None:
+        return _llm_handoff_summary(state, reason=reason, llm=llm)
+    return _template_handoff_summary(state, reason=reason)
+
+
+def _template_handoff_summary(state: AgentState, *, reason: str) -> str:
+    """模板拼接的兜底实现（当前逻辑）"""
+    user_messages = [
+        _message_to_text(message)
+        for message in state.get("messages", [])
+        if isinstance(message, HumanMessage)
+    ]
     attempted = [
         _message_to_text(message)
         for message in state.get("messages", [])
@@ -302,6 +370,44 @@ def build_handoff_summary(state: AgentState, *, reason: str) -> str:
         f"- 未解决原因：{reason}\n"
         "- 建议坐席下一步：核实用户设备型号、订单或售后状态，并给出明确处理时限。"
     )
+
+
+def _llm_handoff_summary(state: AgentState, *, reason: str, llm) -> str:
+    """使用 LLM 生成连贯叙事摘要"""
+    from .prompts import load_prompt
+
+    user_messages = [
+        _message_to_text(message)
+        for message in state.get("messages", [])
+        if isinstance(message, HumanMessage)
+    ]
+    attempted = [
+        _message_to_text(message)
+        for message in state.get("messages", [])
+        if isinstance(message, AIMessage)
+    ]
+    docs = state.get("retrieved_docs", [])
+    perception = state.get("perception")
+
+    prompt_text = load_prompt("handoff_summary.md").format(
+        intent=perception.intent if perception else "未知",
+        emotion=perception.emotion if perception else "未知",
+        handoff_reason=reason,
+        recent_user_messages=" | ".join(user_messages[-3:]) or "（无）",
+        attempted_answers=" | ".join(attempted[-2:]) or "（无）",
+        retrieved_sources=", ".join(doc.source_title for doc in docs[:3]) or "（无）",
+        failed_rag_count=str(state.get("failed_rag_count", 0)),
+        clarification_count=str(state.get("clarification_count", 0)),
+    )
+
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    messages = [
+        SystemMessage(content=prompt_text),
+        HumanMessage(content="请生成交接摘要。"),
+    ]
+    result = llm.invoke(messages)
+    return str(result.content)
 
 
 def _default_handoff_reason(state: AgentState) -> str:
@@ -325,6 +431,7 @@ def _default_handoff_reason(state: AgentState) -> str:
 
 
 # ── 工具函数 ──────────────────────────────────────────────
+
 
 def _last_human_message(messages: list[BaseMessage]) -> str:
     """从消息列表中提取最后一条用户消息"""
@@ -398,7 +505,9 @@ def _resolve_topic(message: str, existing: str | None) -> str | None:
     return existing
 
 
-def _resolve_topic_with_rag(message: str, existing: str | None, rag_service: RagService) -> str | None:
+def _resolve_topic_with_rag(
+    message: str, existing: str | None, rag_service: RagService
+) -> str | None:
     """
     完整版话题解析：先走关键词匹配，若没命中则通过 RAG 无偏检索匹配产品。
 
@@ -427,7 +536,9 @@ def _resolve_topic_with_rag(message: str, existing: str | None, rag_service: Rag
         biased_score = 0.0
         if biased_hits:
             b_hit = biased_hits[0]
-            biased_score = b_hit.final_score if b_hit.final_score is not None else b_hit.score
+            biased_score = (
+                b_hit.final_score if b_hit.final_score is not None else b_hit.score
+            )
 
         if biased_score < 0.35 or score > biased_score + 0.15:
             return mapped_product
@@ -435,7 +546,9 @@ def _resolve_topic_with_rag(message: str, existing: str | None, rag_service: Rag
     return existing
 
 
-def _select_active_agent(perception: PerceptionResult, existing: ActiveAgent | None) -> ActiveAgent:
+def _select_active_agent(
+    perception: PerceptionResult, existing: ActiveAgent | None
+) -> ActiveAgent:
     """
     根据感知结果选择应该激活哪个 agent。
 

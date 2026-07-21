@@ -43,8 +43,15 @@ def _grounded_rag(question: str, topic: str | None) -> RagResult:
         answer="可以戴着洗澡。\n\n引用：\n[1] Dexcom G7 FAQ - https://example.com - chunk #0",
         answer_status="grounded",
         retrieved_docs=docs,
-        evidence_decision=EvidenceDecision(status="grounded", reason="test", top_score=0.9),
-        debug_trace={"top_k": 4, "min_score": 0.35, "evidence_reason": "test", "final_hits": []},
+        evidence_decision=EvidenceDecision(
+            status="grounded", reason="test", top_score=0.9
+        ),
+        debug_trace={
+            "top_k": 4,
+            "min_score": 0.35,
+            "evidence_reason": "test",
+            "final_hits": [],
+        },
     )
 
 
@@ -53,8 +60,15 @@ def _insufficient_rag(question: str, topic: str | None) -> RagResult:
         answer=INSUFFICIENT_EVIDENCE_ANSWER,
         answer_status="insufficient_evidence",
         retrieved_docs=[],
-        evidence_decision=EvidenceDecision(status="insufficient_evidence", reason="test", top_score=None),
-        debug_trace={"top_k": 4, "min_score": 0.35, "evidence_reason": "test", "final_hits": []},
+        evidence_decision=EvidenceDecision(
+            status="insufficient_evidence", reason="test", top_score=None
+        ),
+        debug_trace={
+            "top_k": 4,
+            "min_score": 0.35,
+            "evidence_reason": "test",
+            "final_hits": [],
+        },
     )
 
 
@@ -82,7 +96,9 @@ def test_heuristic_perception_marks_explicit_frustration_as_dissatisfied() -> No
 
 
 def test_product_question_routes_to_rag() -> None:
-    agent = CustomerAgent(perception_fn=_perception(intent="产品咨询"), rag_fn=_grounded_rag)
+    agent = CustomerAgent(
+        perception_fn=_perception(intent="产品咨询"), rag_fn=_grounded_rag
+    )
 
     result = agent.invoke("Dexcom G7 可以戴着洗澡吗？", thread_id="product-route")
 
@@ -93,7 +109,9 @@ def test_product_question_routes_to_rag() -> None:
 
 def test_angry_message_routes_to_empathy_then_handoff() -> None:
     agent = CustomerAgent(
-        perception_fn=_perception(intent="使用问题", emotion="愤怒", handoff_requested=True),
+        perception_fn=_perception(
+            intent="使用问题", emotion="愤怒", handoff_requested=True
+        ),
         rag_fn=_grounded_rag,
     )
 
@@ -102,12 +120,15 @@ def test_angry_message_routes_to_empathy_then_handoff() -> None:
     assert "已为你转人工" in result["messages"][-1].content
     assert result["active_agent"] == "after_sales"
     assert result["perception"].emotion == "愤怒"
-    # handoff_summary 不再写入状态，可通过 messages[-1].content 获取摘要信息
+    # handoff_summary 存在于运行时状态（未在 TypedDict 中声明）
+    assert result.get("handoff_summary")
 
 
 def test_active_handoff_routes_directly_to_handoff() -> None:
     agent = CustomerAgent(
-        perception_fn=_perception(intent="售后诉求", emotion="平静", handoff_requested=True),
+        perception_fn=_perception(
+            intent="售后诉求", emotion="平静", handoff_requested=True
+        ),
         rag_fn=_grounded_rag,
     )
 
@@ -119,7 +140,9 @@ def test_active_handoff_routes_directly_to_handoff() -> None:
 
 
 def test_two_rag_failures_trigger_product_to_after_sales_handoff() -> None:
-    agent = CustomerAgent(perception_fn=_perception(intent="产品咨询"), rag_fn=_insufficient_rag)
+    agent = CustomerAgent(
+        perception_fn=_perception(intent="产品咨询"), rag_fn=_insufficient_rag
+    )
     thread_id = "two-rag-failures"
 
     first = agent.invoke("连接码是几位数？", thread_id=thread_id)
@@ -134,6 +157,8 @@ def test_two_rag_failures_trigger_product_to_after_sales_handoff() -> None:
     assert "RAG 连续两次未找到足够依据" in second["handoff_reason"]
     # handoff 路径携带 retrieved_docs
     assert second["retrieved_docs"] == []
+    # handoff_summary 存在于运行时状态
+    assert "人" in second.get("handoff_summary", "")
 
 
 def test_thread_id_isolates_agent_state() -> None:
@@ -205,4 +230,7 @@ def test_clarification_exceeds_max_rounds_triggers_handoff() -> None:
     second = agent.invoke("就是那个……", thread_id=thread_id)
     third = agent.invoke("……", thread_id=thread_id)
     # 第三次应转人工
-    assert "已为你转人工" in third["messages"][-1].content or "抱歉" in third["messages"][-1].content
+    assert (
+        "已为你转人工" in third["messages"][-1].content
+        or "抱歉" in third["messages"][-1].content
+    )

@@ -24,14 +24,30 @@ REFERENCE_SECTION_PATTERN = re.compile(
     r"(?:^|\n)\s*(?:引用|引用列表|参考|参考资料|参考来源|资料来源|来源)\s*(?:如下|列表)?\s*[:：]?\s*\n?[\s\S]*$",
     re.IGNORECASE,
 )
-REFERENCE_LINE_PATTERN = re.compile(r"^\s*\[\d+\]\s+.+(?:https?://|chunk\s*#|#\d+).*$", re.IGNORECASE)
+REFERENCE_LINE_PATTERN = re.compile(
+    r"^\s*\[\d+\]\s+.+(?:https?://|chunk\s*#|#\d+).*$", re.IGNORECASE
+)
 INSUFFICIENT_ANSWER_PATTERN = re.compile(
     r"(没有在当前知识库找到足够依据|没有足够依据|无相关数据支持|知识库中无相关|未找到.*依据|无法.*确认|无法.*回答)"
 )
 INSUFFICIENT_EVIDENCE_ANSWER = "我没有在当前知识库找到足够依据。为了避免误导，我先不编造答案。你可以补充设备型号、使用场景或问题细节，我再继续帮你查。"
-RISKY_NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:位|天|小时|分钟|米|feet|ft|%|℃|°c|mg/dl|mmol/l)?", re.IGNORECASE)
+RISKY_NUMBER_PATTERN = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:位|天|小时|分钟|米|feet|ft|%|℃|°c|mg/dl|mmol/l)?",
+    re.IGNORECASE,
+)
 TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]{2,}")
-STOPWORDS = {"可以", "能不能", "是不是", "怎么", "多少", "多久", "这个", "它", "请问", "一下"}
+STOPWORDS = {
+    "可以",
+    "能不能",
+    "是不是",
+    "怎么",
+    "多少",
+    "多久",
+    "这个",
+    "它",
+    "请问",
+    "一下",
+}
 PRODUCT_TAG_ALIASES = {
     "gs1 pro": "GS1 Pro",
     "gs1": "GS1",
@@ -53,6 +69,7 @@ class RagService:
     RAG 服务类，负责协调和执行检索增强生成（RAG）管道的所有步骤。
     包括：查询重写 -> 检索 -> 过滤/打分 -> 检索纠错（可选）-> 生成 -> 幻觉校验。
     """
+
     settings: DemoSettings
 
     def answer(self, question: str, *, topic_hint: str | None = None) -> RagResult:
@@ -67,14 +84,18 @@ class RagService:
             RagResult: 包含最终答案、检索到的文档、状态评估及调试信息的对象。
         """
         pipeline_steps: list[dict] = []
-        
+
         # 步骤 1: 查询重写（将口语化或不完整的问题转化为更适合检索的关键词/查询句）
         rewritten_question = _timed_step(
             pipeline_steps,
             "rewrite_question",
-            lambda: self._rewrite_question(question, topic_hint=topic_hint).rewritten_question,
+            lambda: (
+                self._rewrite_question(
+                    question, topic_hint=topic_hint
+                ).rewritten_question
+            ),
         )
-        
+
         # 步骤 2: 文档检索（从向量数据库或混合检索中召回候选文档，并去重）
         candidates = _timed_step(
             pipeline_steps,
@@ -84,17 +105,19 @@ class RagService:
                 limit=self.settings.agent_top_k,
             ),
         )
-        
+
         # 步骤 3: 文档打分与相关性评估
         grades = _timed_step(
             pipeline_steps,
             "grade_documents",
             lambda: self.grade_documents(rewritten_question, candidates, attempt=0),
         )
-        
+
         # 提取评分被标记为相关的文档 ("yes")
-        docs = [doc for doc, grade in zip(candidates, grades) if grade.binary_score == "yes"]
-        
+        docs = [
+            doc for doc, grade in zip(candidates, grades) if grade.binary_score == "yes"
+        ]
+
         # CRAG (Corrective RAG) 纠错机制:
         # 如果检索到的所有文档都被拒绝（不相关），则利用已拒绝的文档作为反面教材，重新重写查询，并再次进行检索和打分。
         # 设定重试上限次数，防止无限循环或产生过高 LLM 开销。
@@ -105,11 +128,13 @@ class RagService:
             rewritten_question = _timed_step(
                 pipeline_steps,
                 "corrective_rewrite",
-                lambda: self._rewrite_question(
-                    question,
-                    topic_hint=topic_hint,
-                    rejected_docs=candidates,
-                ).rewritten_question,
+                lambda: (
+                    self._rewrite_question(
+                        question,
+                        topic_hint=topic_hint,
+                        rejected_docs=candidates,
+                    ).rewritten_question
+                ),
             )
             # 重新检索
             candidates = _timed_step(
@@ -124,19 +149,29 @@ class RagService:
             grades = _timed_step(
                 pipeline_steps,
                 "grade_documents_retry",
-                lambda: self.grade_documents(rewritten_question, candidates, attempt=attempt),
+                lambda: self.grade_documents(
+                    rewritten_question, candidates, attempt=attempt
+                ),
             )
-            docs = [doc for doc, grade in zip(candidates, grades) if grade.binary_score == "yes"]
-            
+            docs = [
+                doc
+                for doc, grade in zip(candidates, grades)
+                if grade.binary_score == "yes"
+            ]
+
         # 步骤 4: 评估可用证据是否充足
-        evidence_decision = self._decide_evidence(rewritten_question, candidates, docs, grades)
+        evidence_decision = self._decide_evidence(
+            rewritten_question, candidates, docs, grades
+        )
         _annotate_last_step(
             pipeline_steps,
             status=evidence_decision.status,
             output_summary=f"accepted={len(docs)}, rejected={len(candidates) - len(docs)}",
-            blocked_reason=evidence_decision.reason if evidence_decision.status == "insufficient_evidence" else None,
+            blocked_reason=evidence_decision.reason
+            if evidence_decision.status == "insufficient_evidence"
+            else None,
         )
-        
+
         # 构建用于调试/前端展示的追溯信息（trace）
         debug_trace = self._build_debug_trace(
             question,
@@ -147,7 +182,7 @@ class RagService:
             pipeline_steps=pipeline_steps,
             rewritten_question=rewritten_question,
         )
-        
+
         # 如果证据不足，直接返回拒绝回答的预设提示，不再调用生成模块
         if evidence_decision.status == "insufficient_evidence":
             return RagResult(
@@ -167,15 +202,17 @@ class RagService:
             ),
             docs,
         )
-        _annotate_last_step(pipeline_steps, status="grounded", output_summary=_summarize_text(answer))
-        
+        _annotate_last_step(
+            pipeline_steps, status="grounded", output_summary=_summarize_text(answer)
+        )
+
         # 检查生成内容中是否包含类似“无法回答/未找到依据”的兜底话术
         if _looks_like_insufficient_answer(answer):
             debug_trace["generation_warning"] = "llm_refused_after_grounded_retrieval"
-            
+
         # 在生成答案末尾附加上格式化后的引用文档列表
         answer = f"{answer.rstrip()}\n\n{format_references(docs)}"
-        
+
         # 步骤 6: 幻觉检测（确保生成的答案有确凿的检索文本支撑，无凭空捏造）
         hallucination_decision = _timed_step(
             pipeline_steps,
@@ -186,16 +223,19 @@ class RagService:
             pipeline_steps,
             status=hallucination_decision.status,
             output_summary=hallucination_decision.reason,
-            blocked_reason=hallucination_decision.failure_type if hallucination_decision.status == "failed" else None,
+            blocked_reason=hallucination_decision.failure_type
+            if hallucination_decision.status == "failed"
+            else None,
         )
         debug_trace["pipeline_steps"] = pipeline_steps
         debug_trace["hallucination_decision"] = hallucination_decision.model_dump()
-        
+
         # 如果幻觉检测失败，则将其视为“证据不足/无法支撑回答”，退回到兜底答案
         if hallucination_decision.status == "failed":
             final_decision = EvidenceDecision(
                 status="insufficient_evidence",
-                reason=hallucination_decision.failure_type or hallucination_decision.reason,
+                reason=hallucination_decision.failure_type
+                or hallucination_decision.reason,
                 top_score=evidence_decision.top_score,
             )
             debug_trace["evidence_status"] = final_decision.status
@@ -207,7 +247,7 @@ class RagService:
                 evidence_decision=final_decision,
                 debug_trace=debug_trace,
             )
-            
+
         return RagResult(
             answer=answer,
             retrieved_docs=docs,
@@ -216,7 +256,9 @@ class RagService:
             debug_trace=debug_trace,
         )
 
-    def retrieve(self, question: str, *, topic_hint: str | None = None) -> list[RetrievedDoc]:
+    def retrieve(
+        self, question: str, *, topic_hint: str | None = None
+    ) -> list[RetrievedDoc]:
         """
         执行检索。根据系统配置，选用稠密向量检索（dense）或稠密+稀疏混合检索（hybrid）。
 
@@ -231,7 +273,9 @@ class RagService:
             return self._search_hybrid(question, topic_hint=topic_hint)
         return self._search_dense(question, topic_hint=topic_hint)
 
-    def _search_dense(self, question: str, *, topic_hint: str | None = None) -> list[RetrievedDoc]:
+    def _search_dense(
+        self, question: str, *, topic_hint: str | None = None
+    ) -> list[RetrievedDoc]:
         """
         利用向量数据库（Qdrant）进行稠密向量相似度检索。
 
@@ -274,7 +318,9 @@ class RagService:
                     chunk_id=str(metadata.get("chunk_id") or ""),
                     source_title=str(metadata.get("source_title") or "unknown"),
                     source_url=str(metadata.get("source_url") or ""),
-                    chunk_text=str(metadata.get("context_text") or document.page_content),
+                    chunk_text=str(
+                        metadata.get("context_text") or document.page_content
+                    ),
                     score=float(score),
                     vector_score=float(score),
                     final_score=float(score),
@@ -286,7 +332,9 @@ class RagService:
         docs.sort(key=lambda item: item.score, reverse=True)
         return docs
 
-    def _search_hybrid(self, question: str, *, topic_hint: str | None = None) -> list[RetrievedDoc]:
+    def _search_hybrid(
+        self, question: str, *, topic_hint: str | None = None
+    ) -> list[RetrievedDoc]:
         """
         混合检索。合并稠密向量检索与基于 BM25 的本地稀疏文本检索（Sparse），提高长尾及专业词汇的召回率。
 
@@ -311,10 +359,14 @@ class RagService:
             product_tags=_explicit_product_tags(question),
         )
         # 使用归一化加权融合对 Dense 和 Sparse 的结果重排。
-        fused = HybridRetriever(alpha=self.settings.agent_fusion_alpha).fuse(dense_docs_to_hits(dense_docs), sparse_hits)
+        fused = HybridRetriever(alpha=self.settings.agent_fusion_alpha).fuse(
+            dense_docs_to_hits(dense_docs), sparse_hits
+        )
         return [hit.doc for hit in fused[: self.settings.agent_top_k]]
 
-    def grade_documents(self, question: str, docs: list[RetrievedDoc], *, attempt: int = 0) -> list[DocumentGrade]:
+    def grade_documents(
+        self, question: str, docs: list[RetrievedDoc], *, attempt: int = 0
+    ) -> list[DocumentGrade]:
         """
         对召回的文档进行批量相关性评估评分。
 
@@ -328,7 +380,9 @@ class RagService:
         """
         return [self._grade_document(question, doc, attempt=attempt) for doc in docs]
 
-    def _grade_document(self, question: str, doc: RetrievedDoc, *, attempt: int) -> DocumentGrade:
+    def _grade_document(
+        self, question: str, doc: RetrievedDoc, *, attempt: int
+    ) -> DocumentGrade:
         """
         评判单个文档与用户提问的相关度。
         若得分过低，直接过滤；若配置了 LLM Grading 且可用，则首选 LLM 进行判定；若 LLM 失败或未启用，则回退到启发式文本词频覆盖度校验。
@@ -336,28 +390,47 @@ class RagService:
         score = doc.final_score if doc.final_score is not None else doc.score
         # 启发式过滤：低于设定的最小相关度阈值，则直接判定为不相关
         if score < self.settings.agent_min_relevance_score:
-            return _document_grade(doc, "no", "score_below_min_relevance", "retrieval_mismatch", attempt=attempt)
-        
+            return _document_grade(
+                doc,
+                "no",
+                "score_below_min_relevance",
+                "retrieval_mismatch",
+                attempt=attempt,
+            )
+
         # 1. 尝试使用大语言模型（LLM）进行智能相关度评判
         if self.settings.llm_configured and self.settings.agent_llm_graders_enabled:
             try:
                 grade = self._llm_document_grade(question, doc)
                 return _document_grade(
-                    doc, grade.binary_score, grade.reason,
+                    doc,
+                    grade.binary_score,
+                    grade.reason,
                     None if grade.binary_score == "yes" else "retrieval_mismatch",
-                    grader="llm", attempt=attempt,
+                    grader="llm",
+                    attempt=attempt,
                 )
             except Exception:
                 # 若大模型调用出错（网络或配额问题），不能直接使系统崩溃，降级到启发式校验
                 pass
-                
+
         # 2. 启发式双重保险：计算关键词覆盖度和重合度
         overlap, coverage = _keyword_overlap_coverage(question, doc.chunk_text)
         if overlap == 0 or coverage < 0.25:
-            return _document_grade(doc, "no", "heuristic_insufficient_query_coverage", "retrieval_mismatch", attempt=attempt)
-        return _document_grade(doc, "yes", "heuristic_relevance_fallback", None, attempt=attempt)
+            return _document_grade(
+                doc,
+                "no",
+                "heuristic_insufficient_query_coverage",
+                "retrieval_mismatch",
+                attempt=attempt,
+            )
+        return _document_grade(
+            doc, "yes", "heuristic_relevance_fallback", None, attempt=attempt
+        )
 
-    def check_hallucination(self, answer: str, docs: list[RetrievedDoc]) -> HallucinationDecision:
+    def check_hallucination(
+        self, answer: str, docs: list[RetrievedDoc]
+    ) -> HallucinationDecision:
         """
         检测生成的回答是否包含幻觉（没有可信检索证据支持的捏造信息）。
         支持格式检查、LLM 幻觉判定以及数值一致性硬过滤。
@@ -370,27 +443,38 @@ class RagService:
             HallucinationDecision: 幻觉检测结论（通过/未通过、具体原因和不可靠内容）。
         """
         # 1. 检查生成的回答中是否包含强制要求的“引用：”标签及格式规范
-        has_reference_line = any(REFERENCE_LINE_PATTERN.match(line) for line in answer.splitlines())
+        has_reference_line = any(
+            REFERENCE_LINE_PATTERN.match(line) for line in answer.splitlines()
+        )
         if "引用：" not in answer or not has_reference_line:
-            return HallucinationDecision(status="failed", reason="answer_missing_required_references", failure_type="format_unstable")
+            return HallucinationDecision(
+                status="failed",
+                reason="answer_missing_required_references",
+                failure_type="format_unstable",
+            )
 
         evidence_text = "\n".join(doc.chunk_text for doc in docs)
         answer_body = REFERENCE_SECTION_PATTERN.sub("", answer).strip()
-        
+
         # 2. 尝试使用 LLM 进行深层次的语义蕴含与事实一致性校验（Grounding Check）
         if self.settings.llm_configured and self.settings.agent_llm_graders_enabled:
             try:
                 grade = self._llm_grounding_grade(answer_body, evidence_text)
                 if not grade.grounded:
                     return HallucinationDecision(
-                        status="failed", reason=grade.reason, failure_type="hallucination",
-                        unsupported_claims=grade.unsupported_claims, grader="llm",
+                        status="failed",
+                        reason=grade.reason,
+                        failure_type="hallucination",
+                        unsupported_claims=grade.unsupported_claims,
+                        grader="llm",
                     )
-                return HallucinationDecision(status="grounded", reason=grade.reason, grader="llm")
+                return HallucinationDecision(
+                    status="grounded", reason=grade.reason, grader="llm"
+                )
             except Exception:
                 # 降级到启发式规则校验
                 pass
-                
+
         # 3. 启发式数值硬过滤：数字在事实陈述中极其关键，若回答中含有检索文本中从未出现过的数字，则判定为幻觉风险
         unsupported_numbers = [
             number
@@ -402,12 +486,19 @@ class RagService:
                 status="failed",
                 reason="answer_contains_numbers_not_supported_by_evidence",
                 failure_type="hallucination",
-                risky_numbers=unsupported_numbers, grader="heuristic",
+                risky_numbers=unsupported_numbers,
+                grader="heuristic",
             )
-        return HallucinationDecision(status="grounded", reason="heuristic_grounding_fallback", grader="heuristic")
+        return HallucinationDecision(
+            status="grounded", reason="heuristic_grounding_fallback", grader="heuristic"
+        )
 
     def _rewrite_question(
-        self, question: str, *, topic_hint: str | None = None, rejected_docs: list[RetrievedDoc] | None = None,
+        self,
+        question: str,
+        *,
+        topic_hint: str | None = None,
+        rejected_docs: list[RetrievedDoc] | None = None,
     ) -> QueryRewrite:
         """
         大语言模型辅助重写问题，以获取更好的检索召回效果。
@@ -415,17 +506,32 @@ class RagService:
         """
         stripped = question.strip()
         if not self.settings.llm_configured:
-            context = f"{topic_hint}\n" if topic_hint and topic_hint.lower() not in stripped.lower() else ""
-            return QueryRewrite(rewritten_question=f"{context}{stripped}", reason="contextualized_query_fallback")
+            context = (
+                f"{topic_hint}\n"
+                if topic_hint and topic_hint.lower() not in stripped.lower()
+                else ""
+            )
+            return QueryRewrite(
+                rewritten_question=f"{context}{stripped}",
+                reason="contextualized_query_fallback",
+            )
         # 限制传入的反面教材字符数，防止上下文溢出
-        rejected_context = "\n\n".join(doc.chunk_text[:600] for doc in (rejected_docs or []))
+        rejected_context = "\n\n".join(
+            doc.chunk_text[:600] for doc in (rejected_docs or [])
+        )
         try:
             chat = self._structured_chat(max_tokens=300)
             return chat.with_structured_output(QueryRewrite).invoke(
-                load_prompt("rag_rewrite.md").format(question=stripped, topic_hint=topic_hint or "", rejected_context=rejected_context)
+                load_prompt("rag_rewrite.md").format(
+                    question=stripped,
+                    topic_hint=topic_hint or "",
+                    rejected_context=rejected_context,
+                )
             )
         except Exception:
-            return QueryRewrite(rewritten_question=stripped, reason="rewrite_model_unavailable")
+            return QueryRewrite(
+                rewritten_question=stripped, reason="rewrite_model_unavailable"
+            )
 
     def _decide_evidence(
         self,
@@ -447,16 +553,24 @@ class RagService:
             EvidenceDecision: 最终判断是否可信并具备足够证据。
         """
         if not candidate_docs:
-            return EvidenceDecision(status="insufficient_evidence", reason="knowledge_missing", top_score=None)
+            return EvidenceDecision(
+                status="insufficient_evidence",
+                reason="knowledge_missing",
+                top_score=None,
+            )
         if not accepted_docs:
             top_score = _ranking_score(candidate_docs[0])
             reason = "retrieval_mismatch"
             if all(grade.failure_type == "retrieval_mismatch" for grade in grades):
                 reason = "retrieval_mismatch"
-            return EvidenceDecision(status="insufficient_evidence", reason=reason, top_score=top_score)
+            return EvidenceDecision(
+                status="insufficient_evidence", reason=reason, top_score=top_score
+            )
         return self._has_sufficient_evidence(question, accepted_docs)
 
-    def _has_sufficient_evidence(self, question: str, docs: list[RetrievedDoc]) -> EvidenceDecision:
+    def _has_sufficient_evidence(
+        self, question: str, docs: list[RetrievedDoc]
+    ) -> EvidenceDecision:
         """
         检测已被采纳的文档库中最优相似度分值，判定其是否高于预设的最低相关度界限。
         """
@@ -468,7 +582,9 @@ class RagService:
             )
 
         top_doc = docs[0]
-        top_score = top_doc.final_score if top_doc.final_score is not None else top_doc.score
+        top_score = (
+            top_doc.final_score if top_doc.final_score is not None else top_doc.score
+        )
         if top_score < self.settings.agent_min_relevance_score:
             return EvidenceDecision(
                 status="insufficient_evidence",
@@ -476,7 +592,9 @@ class RagService:
                 top_score=top_score,
             )
 
-        return EvidenceDecision(status="grounded", reason="graded_evidence_available", top_score=top_score)
+        return EvidenceDecision(
+            status="grounded", reason="graded_evidence_available", top_score=top_score
+        )
 
     def _build_debug_trace(
         self,
@@ -500,13 +618,17 @@ class RagService:
             "retrieval_strategy": self.settings.agent_retrieval_strategy,
             "top_k": self.settings.agent_top_k,
             "min_score": self.settings.agent_min_relevance_score,
-            "fusion_alpha": self.settings.agent_fusion_alpha if self.settings.agent_retrieval_strategy == "hybrid" else None,
+            "fusion_alpha": self.settings.agent_fusion_alpha
+            if self.settings.agent_retrieval_strategy == "hybrid"
+            else None,
             "explicit_product_tags": _explicit_product_tags(question),
             "evidence_status": evidence_decision.status,
             "evidence_reason": evidence_decision.reason,
             "document_grades": [grade.model_dump() for grade in grades],
             "pipeline_steps": pipeline_steps or [],
-            "final_hits": [] if evidence_decision.status == "insufficient_evidence" else [
+            "final_hits": []
+            if evidence_decision.status == "insufficient_evidence"
+            else [
                 {
                     "source_title": doc.source_title,
                     "source_url": doc.source_url,
@@ -561,13 +683,19 @@ class RagService:
         )
         message = chat.invoke(
             [
-                SystemMessage(content=load_prompt("rag_answer.md").format(context=context, question=question)),
+                SystemMessage(
+                    content=load_prompt("rag_answer.md").format(
+                        context=context, question=question
+                    )
+                ),
                 HumanMessage(content=question),
             ]
         )
         content = message.content
         if isinstance(content, list):
-            return "\n".join(item.get("text", "") for item in content if isinstance(item, dict)).strip()
+            return "\n".join(
+                item.get("text", "") for item in content if isinstance(item, dict)
+            ).strip()
         return str(content).strip()
 
     def _structured_chat(self, *, max_tokens: int) -> object:
@@ -590,7 +718,9 @@ class RagService:
         调用 LLM 对文档块与提问的实际相关性进行结构化输出判定。
         """
         chat = self._structured_chat(max_tokens=250)
-        prompt = load_prompt("rag_document_grader.md").format(question=question, document=doc.chunk_text)
+        prompt = load_prompt("rag_document_grader.md").format(
+            question=question, document=doc.chunk_text
+        )
         return chat.with_structured_output(RelevanceGrade).invoke(prompt)
 
     def _llm_grounding_grade(self, answer: str, evidence: str) -> GroundingGrade:
@@ -598,7 +728,9 @@ class RagService:
         调用 LLM 判断生成的回答是否可以被给定的参考证据（文档）充分蕴含支撑（避免语义级别的幻觉问题）。
         """
         chat = self._structured_chat(max_tokens=350)
-        prompt = load_prompt("rag_grounding_grader.md").format(answer=answer, evidence=evidence)
+        prompt = load_prompt("rag_grounding_grader.md").format(
+            answer=answer, evidence=evidence
+        )
         return chat.with_structured_output(GroundingGrade).invoke(prompt)
 
 
@@ -613,7 +745,9 @@ def format_references(docs: list[RetrievedDoc]) -> str:
     return "\n".join(lines)
 
 
-def dedupe_retrieved_sources(docs: list[RetrievedDoc], *, limit: int | None = None) -> list[RetrievedDoc]:
+def dedupe_retrieved_sources(
+    docs: list[RetrievedDoc], *, limit: int | None = None
+) -> list[RetrievedDoc]:
     """
     对召回的文档集合进行来源去重。
     如果同一个来源（URL/标题）返回了多个分块（chunk），只保留分值最高的那一个分块，最后根据相关度分数从高到低重新排序。
@@ -743,7 +877,9 @@ def _explicit_product_tags(question: str) -> list[str]:
     """只从用户明确说出的型号/产品提取标签，避免用历史话题误过滤新问题。"""
     lowered = question.lower()
     tags: list[str] = []
-    for alias, tag in sorted(PRODUCT_TAG_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+    for alias, tag in sorted(
+        PRODUCT_TAG_ALIASES.items(), key=lambda item: len(item[0]), reverse=True
+    ):
         if alias in lowered and tag not in tags:
             tags.append(tag)
     return tags
@@ -772,7 +908,9 @@ def _normalize_title(t: str) -> str:
     return re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff]+", "", t).lower()
 
 
-def _strip_generated_references(answer: str, docs: list[RetrievedDoc] | None = None) -> str:
+def _strip_generated_references(
+    answer: str, docs: list[RetrievedDoc] | None = None
+) -> str:
     """
     去除 LLM 输出末尾可能自行生成的冗余引用文献格式，以便使用我们规范的 `format_references` 生成。
     """
@@ -795,7 +933,9 @@ def _strip_generated_references(answer: str, docs: list[RetrievedDoc] | None = N
                     is_title_match = False
                     for doc in docs:
                         title_norm = _normalize_title(doc.source_title)
-                        if title_norm and (content_norm in title_norm or title_norm in content_norm):
+                        if title_norm and (
+                            content_norm in title_norm or title_norm in content_norm
+                        ):
                             is_title_match = True
                             break
                     if is_title_match:
@@ -843,7 +983,7 @@ def _keyword_overlap_coverage(question: str, evidence: str) -> tuple[int, float]
     eng_tokens = re.findall(r"[a-zA-Z0-9]+", question)
     han_chars = re.findall(r"[\u4e00-\u9fff]", question)
     # 为中文构建二元语法结构 (bigrams)，避免像 “在” “是” 这样的单个常见汉字导致启发式匹配的高误报率。
-    han_bigrams = [han_chars[i] + han_chars[i+1] for i in range(len(han_chars)-1)]
+    han_bigrams = [han_chars[i] + han_chars[i + 1] for i in range(len(han_chars) - 1)]
     tokens = set(eng_tokens) | set(han_bigrams)
     # 过滤停用词以提高关键词提取的纯净度
     question_tokens = {t.lower() for t in tokens if t not in STOPWORDS}
@@ -870,7 +1010,11 @@ def _is_number_supported(number_str: str, evidence_text: str) -> bool:
         return True
 
     # 年份映射：如果是4位数字组成的年份（如2023年），兼容检测其2位简称（23年）是否存在于原文中。
-    if len(core_num) == 4 and core_num.isdigit() and (core_num.startswith("19") or core_num.startswith("20")):
+    if (
+        len(core_num) == 4
+        and core_num.isdigit()
+        and (core_num.startswith("19") or core_num.startswith("20"))
+    ):
         short_year = core_num[2:]
         if short_year in evidence_text:
             return True

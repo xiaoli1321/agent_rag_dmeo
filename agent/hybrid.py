@@ -42,7 +42,9 @@ class HybridRetriever:
     def __init__(self, alpha: float = 0.7) -> None:
         self.alpha = max(0.0, min(1.0, float(alpha)))
 
-    def fuse(self, dense_hits: list[DenseHit], sparse_hits: list[SparseHit]) -> list[HybridHit]:
+    def fuse(
+        self, dense_hits: list[DenseHit], sparse_hits: list[SparseHit]
+    ) -> list[HybridHit]:
         if not dense_hits and not sparse_hits:
             return []
         if not sparse_hits:
@@ -52,7 +54,13 @@ class HybridRetriever:
                     dense_score=hit.score,
                     sparse_score=None,
                     fusion_score=hit.score,
-                    doc=_with_scores(hit.doc, vector_score=hit.score, sparse_score=None, final_score=hit.score, retrieval_source="dense"),
+                    doc=_with_scores(
+                        hit.doc,
+                        vector_score=hit.score,
+                        sparse_score=None,
+                        final_score=hit.score,
+                        retrieval_source="dense",
+                    ),
                     metadata=hit.metadata,
                 )
                 for hit in dense_hits
@@ -64,7 +72,13 @@ class HybridRetriever:
                     dense_score=None,
                     sparse_score=hit.score,
                     fusion_score=hit.score,
-                    doc=_with_scores(hit.doc, vector_score=None, sparse_score=hit.score, final_score=hit.score, retrieval_source="sparse"),
+                    doc=_with_scores(
+                        hit.doc,
+                        vector_score=None,
+                        sparse_score=hit.score,
+                        final_score=hit.score,
+                        retrieval_source="sparse",
+                    ),
                     metadata=hit.metadata,
                 )
                 for hit in sparse_hits
@@ -73,14 +87,18 @@ class HybridRetriever:
         dense_map = {hit.chunk_id: hit for hit in dense_hits}
         sparse_map = {hit.chunk_id: hit for hit in sparse_hits}
         dense_norm = _normalize_scores({hit.chunk_id: hit.score for hit in dense_hits})
-        sparse_norm = _normalize_scores({hit.chunk_id: hit.score for hit in sparse_hits})
+        sparse_norm = _normalize_scores(
+            {hit.chunk_id: hit.score for hit in sparse_hits}
+        )
 
         fused: list[HybridHit] = []
         for chunk_id in set(dense_map) | set(sparse_map):
             dense = dense_map.get(chunk_id)
             sparse = sparse_map.get(chunk_id)
-            fusion_score = self.alpha * dense_norm.get(chunk_id, 0.0) + (1.0 - self.alpha) * sparse_norm.get(chunk_id, 0.0)
-            source_doc = (dense.doc if dense else sparse.doc)  # type: ignore[union-attr]
+            fusion_score = self.alpha * dense_norm.get(chunk_id, 0.0) + (
+                1.0 - self.alpha
+            ) * sparse_norm.get(chunk_id, 0.0)
+            source_doc = dense.doc if dense else sparse.doc  # type: ignore[union-attr]
             doc = _with_scores(
                 source_doc,
                 vector_score=dense.score if dense else None,
@@ -103,7 +121,14 @@ class HybridRetriever:
                     metadata=metadata,
                 )
             )
-        fused.sort(key=lambda item: (item.fusion_score, item.dense_score or 0.0, item.sparse_score or 0.0), reverse=True)
+        fused.sort(
+            key=lambda item: (
+                item.fusion_score,
+                item.dense_score or 0.0,
+                item.sparse_score or 0.0,
+            ),
+            reverse=True,
+        )
         return fused
 
 
@@ -111,7 +136,13 @@ class LocalSparseRetriever:
     def __init__(self, docs: list[RetrievedDoc] | None = None) -> None:
         self.docs = docs if docs is not None else _load_local_docs()
         self.doc_tokens = [
-            _tokenize(doc.chunk_text + " " + doc.source_title + " " + " ".join(doc.product_tags))
+            _tokenize(
+                doc.chunk_text
+                + " "
+                + doc.source_title
+                + " "
+                + " ".join(doc.product_tags)
+            )
             for doc in self.docs
         ]
         self.doc_freq: dict[str, int] = {}
@@ -119,7 +150,9 @@ class LocalSparseRetriever:
             for token in set(tokens):
                 self.doc_freq[token] = self.doc_freq.get(token, 0) + 1
 
-    def search(self, query: str, *, top_k: int, product_tags: list[str] | None = None) -> list[SparseHit]:
+    def search(
+        self, query: str, *, top_k: int, product_tags: list[str] | None = None
+    ) -> list[SparseHit]:
         query_tokens = _tokenize(query)
         if not query_tokens:
             return []
@@ -138,7 +171,9 @@ class LocalSparseRetriever:
                 score += tf * idf
             if score > 0:
                 chunk_id = doc.chunk_id or doc.source_url
-                hits.append(SparseHit(chunk_id=chunk_id, score=round(score, 6), doc=doc))
+                hits.append(
+                    SparseHit(chunk_id=chunk_id, score=round(score, 6), doc=doc)
+                )
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[:top_k]
 
@@ -161,7 +196,10 @@ def _normalize_scores(scores: dict[str, float]) -> dict[str, float]:
     max_score = max(scores.values())
     if max_score == min_score:
         return {key: 1.0 for key in scores}
-    return {key: (value - min_score) / (max_score - min_score) for key, value in scores.items()}
+    return {
+        key: (value - min_score) / (max_score - min_score)
+        for key, value in scores.items()
+    }
 
 
 def _with_scores(

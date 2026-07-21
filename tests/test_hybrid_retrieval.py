@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from ..agent.hybrid import DenseHit, HybridRetriever, LocalSparseRetriever, SparseHit, _load_local_docs, dense_docs_to_hits
+from ..agent.hybrid import (
+    DenseHit,
+    HybridRetriever,
+    LocalSparseRetriever,
+    SparseHit,
+    _load_local_docs,
+    dense_docs_to_hits,
+)
 from ..agent.models import RetrievedDoc
 from ..agent.rag import RagService
 from ..config import DemoSettings
@@ -22,8 +29,12 @@ def test_hybrid_alpha_changes_fusion_order() -> None:
     sparse_a = SparseHit(chunk_id="a", score=0.1, doc=_doc("A", "a", "semantic"))
     sparse_b = SparseHit(chunk_id="b", score=0.9, doc=_doc("B", "b", "keyword"))
 
-    dense_weighted = HybridRetriever(alpha=0.9).fuse([dense_a, dense_b], [sparse_a, sparse_b])
-    sparse_weighted = HybridRetriever(alpha=0.1).fuse([dense_a, dense_b], [sparse_a, sparse_b])
+    dense_weighted = HybridRetriever(alpha=0.9).fuse(
+        [dense_a, dense_b], [sparse_a, sparse_b]
+    )
+    sparse_weighted = HybridRetriever(alpha=0.1).fuse(
+        [dense_a, dense_b], [sparse_a, sparse_b]
+    )
 
     assert dense_weighted[0].chunk_id == "a"
     assert sparse_weighted[0].chunk_id == "b"
@@ -74,7 +85,9 @@ def test_local_sparse_retriever_filters_explicit_product_tags() -> None:
     eco = _doc("ECO 蓝牙连接", "eco", "蓝牙连接失败")
     eco.product_tags = ["ECO"]
 
-    hits = LocalSparseRetriever(docs=[gs3, eco]).search("蓝牙连接", top_k=2, product_tags=["ECO"])
+    hits = LocalSparseRetriever(docs=[gs3, eco]).search(
+        "蓝牙连接", top_k=2, product_tags=["ECO"]
+    )
 
     assert [hit.doc.source_title for hit in hits] == ["ECO 蓝牙连接"]
 

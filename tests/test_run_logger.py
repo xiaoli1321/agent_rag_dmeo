@@ -29,7 +29,9 @@ def _state() -> dict:
                 final_score=0.9,
             )
         ],
-        "evidence_decision": EvidenceDecision(status="grounded", reason="test", top_score=0.9),
+        "evidence_decision": EvidenceDecision(
+            status="grounded", reason="test", top_score=0.9
+        ),
         "debug_trace": {"qwen_api_key": "secret", "evidence_reason": "test"},
         "handoff_reason": None,
     }
@@ -38,7 +40,9 @@ def _state() -> dict:
 def test_run_logger_writes_jsonl(tmp_path) -> None:
     logger = AgentRunLogger(enabled=True, log_dir=tmp_path)
 
-    path = logger.log_turn(thread_id="t1", user_message="hello", state=_state(), latency_ms=12)
+    path = logger.log_turn(
+        thread_id="t1", user_message="hello", state=_state(), latency_ms=12
+    )
 
     assert path is not None
     record = json.loads(path.read_text(encoding="utf-8").strip())
@@ -52,14 +56,17 @@ def test_run_logger_writes_jsonl(tmp_path) -> None:
 def test_run_logger_disabled_does_not_write(tmp_path) -> None:
     logger = AgentRunLogger(enabled=False, log_dir=tmp_path)
 
-    path = logger.log_turn(thread_id="t1", user_message="hello", state=_state(), latency_ms=12)
+    path = logger.log_turn(
+        thread_id="t1", user_message="hello", state=_state(), latency_ms=12
+    )
 
     assert path is None
     assert not list(tmp_path.iterdir())
 
 
 def test_sanitize_record_removes_sensitive_nested_keys() -> None:
-    record = sanitize_record({"safe": 1, "nested": {"api_key": "secret", "token_value": "secret"}})
+    record = sanitize_record(
+        {"safe": 1, "nested": {"api_key": "secret", "token_value": "secret"}}
+    )
 
     assert record == {"safe": 1, "nested": {}}
-

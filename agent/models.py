@@ -7,21 +7,28 @@ from pydantic import BaseModel, Field
 try:
     from langgraph.graph.message import add_messages
 except ImportError:  # pragma: no cover - dependency guard for pure model tests
+
     def add_messages(left: list | None, right: list | None) -> list:
         return list(left or []) + list(right or [])
 
 
 Intent = Literal["产品咨询", "使用问题", "售后诉求", "闲聊"]
 Emotion = Literal["平静", "不满", "愤怒"]
-ActiveAgent = Literal["product_consultant", "after_sales", "empathy_agent", "pending_clarification"]
+ActiveAgent = Literal[
+    "product_consultant", "after_sales", "empathy_agent", "pending_clarification"
+]
 
 
 class PerceptionResult(BaseModel):
     intent: Intent = Field(description="用户当前消息的主意图，只能从枚举中选择。")
     emotion: Emotion = Field(description="用户当前消息的情绪强度，只能从枚举中选择。")
     confidence: float = Field(ge=0.0, le=1.0, description="分类置信度，0 到 1。")
-    handoff_requested: bool = Field(description="用户是否明确要求人工、客服、投诉、退款或赔偿。")
-    reason: str = Field(default="模型未返回分类依据。", description="一句话解释分类依据，便于调试路由。")
+    handoff_requested: bool = Field(
+        description="用户是否明确要求人工、客服、投诉、退款或赔偿。"
+    )
+    reason: str = Field(
+        default="模型未返回分类依据。", description="一句话解释分类依据，便于调试路由。"
+    )
 
 
 class RetrievedDoc(BaseModel):
@@ -44,7 +51,9 @@ class EvidenceDecision(BaseModel):
     has_numeric_support: bool | None = None
 
 
-FailureType = Literal["knowledge_missing", "retrieval_mismatch", "hallucination", "format_unstable"]
+FailureType = Literal[
+    "knowledge_missing", "retrieval_mismatch", "hallucination", "format_unstable"
+]
 
 
 class DocumentGrade(BaseModel):
@@ -70,22 +79,30 @@ class HallucinationDecision(BaseModel):
 class QueryRewrite(BaseModel):
     """A retrieval-ready query, kept separate from the user's original wording."""
 
-    rewritten_question: str = Field(description="Standalone query that preserves the user's intent and constraints.")
+    rewritten_question: str = Field(
+        description="Standalone query that preserves the user's intent and constraints."
+    )
     reason: str = Field(description="Short explanation of the rewrite decision.")
 
 
 class RelevanceGrade(BaseModel):
     """Self-RAG/CRAG document relevance decision."""
 
-    binary_score: Literal["yes", "no"] = Field(description="yes only when this document can help answer the question.")
+    binary_score: Literal["yes", "no"] = Field(
+        description="yes only when this document can help answer the question."
+    )
     reason: str = Field(description="Short evidence-based reason.")
 
 
 class GroundingGrade(BaseModel):
     """Post-generation answer grounding decision."""
 
-    grounded: bool = Field(description="Whether every factual claim in the answer is supported by the evidence.")
-    unsupported_claims: list[str] = Field(default_factory=list, description="Unsupported factual claims, if any.")
+    grounded: bool = Field(
+        description="Whether every factual claim in the answer is supported by the evidence."
+    )
+    unsupported_claims: list[str] = Field(
+        default_factory=list, description="Unsupported factual claims, if any."
+    )
     reason: str = Field(description="Short evidence-based reason.")
 
 
@@ -106,3 +123,4 @@ class AgentState(TypedDict, total=False):
     failed_rag_count: int
     handoff_reason: str | None
     clarification_count: int
+    handoff_summary: str  # 转人工时由 _after_sales 写入，供 invoke() 返回消费者使用

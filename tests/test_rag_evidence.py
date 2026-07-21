@@ -18,9 +18,15 @@ def _service() -> RagService:
 
 def _test_settings() -> DemoSettings:
     return DemoSettings(
-        agent_top_k=4, agent_min_relevance_score=0.35, agent_llm_graders_enabled=False,
-        qwen_api_base=None, qwen_api_key=None, qwen_llm_model=None,
-        llm_api_base=None, llm_api_key=None, llm_model=None,
+        agent_top_k=4,
+        agent_min_relevance_score=0.35,
+        agent_llm_graders_enabled=False,
+        qwen_api_base=None,
+        qwen_api_key=None,
+        qwen_llm_model=None,
+        llm_api_base=None,
+        llm_api_key=None,
+        llm_model=None,
     )
 
 
@@ -67,7 +73,9 @@ def test_evidence_gate_trusts_the_prior_document_grader() -> None:
     assert decision.reason == "graded_evidence_available"
 
 
-def test_document_grader_rejects_unrelated_evidence_without_product_word_rules() -> None:
+def test_document_grader_rejects_unrelated_evidence_without_product_word_rules() -> (
+    None
+):
     service = _service()
     docs = [_doc("硅基动感传感器支持 14 天连续监测。")]
 
@@ -203,7 +211,9 @@ def test_generated_trailing_reference_lines_are_stripped_without_header() -> Non
 
 def test_insufficient_answer_does_not_return_user_references() -> None:
     class StubRagService(RagService):
-        def retrieve(self, question: str, *, topic_hint: str | None = None) -> list[RetrievedDoc]:
+        def retrieve(
+            self, question: str, *, topic_hint: str | None = None
+        ) -> list[RetrievedDoc]:
             return [_doc("CGM 是动态血糖监测。", score=0.1)]
 
     service = StubRagService(settings=_test_settings())
@@ -219,7 +229,9 @@ def test_insufficient_answer_does_not_return_user_references() -> None:
 
 def test_llm_refusal_after_grounded_retrieval_keeps_retrieved_docs() -> None:
     class StubRagService(RagService):
-        def retrieve(self, question: str, *, topic_hint: str | None = None) -> list[RetrievedDoc]:
+        def retrieve(
+            self, question: str, *, topic_hint: str | None = None
+        ) -> list[RetrievedDoc]:
             return [_doc("数据不准时，先判断佩戴是否未满 48 小时。", score=0.8)]
 
         def _generate_answer(self, question: str, docs: list[RetrievedDoc]) -> str:
@@ -231,7 +243,10 @@ def test_llm_refusal_after_grounded_retrieval_keeps_retrieved_docs() -> None:
 
     assert result.answer_status == "grounded"
     assert result.retrieved_docs[0].source_title == "Dexcom G7 FAQ"
-    assert result.debug_trace["generation_warning"] == "llm_refused_after_grounded_retrieval"
+    assert (
+        result.debug_trace["generation_warning"]
+        == "llm_refused_after_grounded_retrieval"
+    )
     assert result.debug_trace["final_hits"][0]["source_title"] == "Dexcom G7 FAQ"
     assert "引用：" in result.answer
 
@@ -240,7 +255,9 @@ def test_resolve_topic_handles_watch_and_patch() -> None:
     from ..agent.graph import _resolve_topic, _resolve_topic_with_rag
 
     class MockRagService(RagService):
-        def retrieve(self, question: str, topic_hint: str | None = None) -> list[RetrievedDoc]:
+        def retrieve(
+            self, question: str, topic_hint: str | None = None
+        ) -> list[RetrievedDoc]:
             if topic_hint == "Dexcom G7":
                 return []
             if any(w in question.lower() for w in ("手表", "watch", "加固贴")):
@@ -260,8 +277,14 @@ def test_resolve_topic_handles_watch_and_patch() -> None:
 
 def test_keyword_overlap_robustness() -> None:
     from ..agent.rag import _keyword_overlap
+
     assert _keyword_overlap("硅基加固贴尺寸是多少", "ECO加固贴尺寸 GS1加固贴尺寸") > 0
-    assert _keyword_overlap("Dexcom G7 可以戴着洗澡吗？", "Dexcom says the G7 sensor is waterproof.") > 0
+    assert (
+        _keyword_overlap(
+            "Dexcom G7 可以戴着洗澡吗？", "Dexcom says the G7 sensor is waterproof."
+        )
+        > 0
+    )
 
 
 def test_hallucination_check_year_mapping() -> None:
