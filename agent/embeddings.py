@@ -4,6 +4,7 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
+from time import sleep
 from typing import Any
 
 from langchain_core.embeddings import Embeddings
@@ -14,6 +15,7 @@ from ..config import DemoSettings
 MULTIMODAL_EMBEDDING_PATH = (
     "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
 )
+EMBEDDING_RETRY_DELAYS_SECONDS = (1, 2, 4)
 
 
 def get_embeddings(settings: DemoSettings) -> Embeddings:
@@ -60,14 +62,23 @@ class DashScopeMultimodalEmbeddings(Embeddings):
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"DashScope multimodal embedding failed: HTTP {exc.code} {body}"
-            ) from exc
+        for attempt, delay in enumerate((*EMBEDDING_RETRY_DELAYS_SECONDS, None), 1):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                raise RuntimeError(
+                    f"DashScope multimodal embedding failed: HTTP {exc.code} {body}"
+                ) from exc
+            except urllib.error.URLError as exc:
+                if delay is None:
+                    raise RuntimeError(
+                        "DashScope multimodal embedding failed after 4 attempts: "
+                        f"{exc.reason}"
+                    ) from exc
+                sleep(delay)
         return _extract_embedding(data)
 
 

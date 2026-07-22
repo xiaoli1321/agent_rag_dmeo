@@ -48,6 +48,9 @@ class DemoSettings(BaseSettings):
     agent_fusion_alpha: float = Field(default=0.7, ge=0.0, le=1.0)
     agent_corrective_retries: int = Field(default=1, ge=0, le=2)
     agent_llm_graders_enabled: bool = True
+    agent_intent_confidence_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    agent_max_clarification_turns: int = Field(default=2, ge=1, le=5)
+    agent_perception_history_turns: int = Field(default=6, ge=1, le=20)
     agent_run_log_enabled: bool = True
     agent_run_log_dir: Path = Field(default_factory=lambda: DEMO_ROOT / "data" / "runs")
     demo_chunking_strategy: str = "structural"

@@ -83,7 +83,7 @@ def split_documents(
         for document in documents
     ]
     if normalized_strategy in {"structural", "parent-child"}:
-        return _split_with_app_chunking(
+        return _split_with_demo_chunking(
             source_docs,
             strategy=normalized_strategy,
             chunk_size=chunk_size,
@@ -120,7 +120,7 @@ def split_documents(
     return enriched
 
 
-def _split_with_app_chunking(
+def _split_with_demo_chunking(
     source_docs: list[Any],
     *,
     strategy: str,
@@ -129,8 +129,7 @@ def _split_with_app_chunking(
 ) -> list[Any]:
     from langchain_core.documents import Document
 
-    from app.ingestion.chunking import build_chunks
-    from app.ingestion.types import ChunkingOptions, ParsedBlock
+    from .chunking import ChunkingOptions, ParsedBlock, build_chunks
 
     parsed_blocks = [
         ParsedBlock(

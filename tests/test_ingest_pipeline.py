@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from ..ingest.pipeline import clean_documents, load_sources, split_documents
 
 
@@ -28,7 +26,6 @@ def test_load_clean_split_sources_have_required_payload_metadata() -> None:
     assert first.metadata["product_tags"] == ["MetaTwin", "GS1 Pro", "KS3"]
 
 
-@pytest.mark.xfail(reason="P0-2: app.ingestion module not yet available", strict=False)
 def test_structural_chunking_strategy_keeps_section_metadata() -> None:
     cleaned = clean_documents(load_sources()[:2])
 
@@ -41,7 +38,6 @@ def test_structural_chunking_strategy_keeps_section_metadata() -> None:
     assert all("split_reason" not in chunk.metadata for chunk in chunks)
 
 
-@pytest.mark.xfail(reason="P0-2: app.ingestion module not yet available", strict=False)
 def test_parent_child_chunking_strategy_embeds_child_with_parent_context() -> None:
     cleaned = clean_documents(load_sources()[:2])
 

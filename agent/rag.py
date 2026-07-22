@@ -410,9 +410,8 @@ class RagService:
                     grader="llm",
                     attempt=attempt,
                 )
-            except Exception:
-                # 若大模型调用出错（网络或配额问题），不能直接使系统崩溃，降级到启发式校验
-                pass
+            except Exception as exc:
+                raise RuntimeError("LLM document grading failed") from exc
 
         # 2. 启发式双重保险：计算关键词覆盖度和重合度
         overlap, coverage = _keyword_overlap_coverage(question, doc.chunk_text)
@@ -471,9 +470,8 @@ class RagService:
                 return HallucinationDecision(
                     status="grounded", reason=grade.reason, grader="llm"
                 )
-            except Exception:
-                # 降级到启发式规则校验
-                pass
+            except Exception as exc:
+                raise RuntimeError("LLM grounding check failed") from exc
 
         # 3. 启发式数值硬过滤：数字在事实陈述中极其关键，若回答中含有检索文本中从未出现过的数字，则判定为幻觉风险
         unsupported_numbers = [
@@ -521,17 +519,15 @@ class RagService:
         )
         try:
             chat = self._structured_chat(max_tokens=300)
-            return chat.with_structured_output(QueryRewrite).invoke(
+            return chat.with_structured_output(QueryRewrite, method="json_mode").invoke(
                 load_prompt("rag_rewrite.md").format(
                     question=stripped,
                     topic_hint=topic_hint or "",
                     rejected_context=rejected_context,
                 )
             )
-        except Exception:
-            return QueryRewrite(
-                rewritten_question=stripped, reason="rewrite_model_unavailable"
-            )
+        except Exception as exc:
+            raise RuntimeError("LLM query rewrite failed") from exc
 
     def _decide_evidence(
         self,
@@ -721,7 +717,7 @@ class RagService:
         prompt = load_prompt("rag_document_grader.md").format(
             question=question, document=doc.chunk_text
         )
-        return chat.with_structured_output(RelevanceGrade).invoke(prompt)
+        return chat.with_structured_output(RelevanceGrade, method="json_mode").invoke(prompt)
 
     def _llm_grounding_grade(self, answer: str, evidence: str) -> GroundingGrade:
         """
@@ -731,7 +727,7 @@ class RagService:
         prompt = load_prompt("rag_grounding_grader.md").format(
             answer=answer, evidence=evidence
         )
-        return chat.with_structured_output(GroundingGrade).invoke(prompt)
+        return chat.with_structured_output(GroundingGrade, method="json_mode").invoke(prompt)
 
 
 def format_references(docs: list[RetrievedDoc]) -> str:

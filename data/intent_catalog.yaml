@@ -1,0 +1,33 @@
+intents:
+  产品咨询:
+    description: 询问 CGM 功能、规格、兼容性、防水、佩戴、校准或读数原理等知识。
+    examples: ["CGM 是什么？", "GS3 防水吗？"]
+    handler: product_consultant
+    required_slots: []
+    clarification_order: []
+    direct_handoff: false
+    default_actionability: ready
+  使用问题:
+    description: 已在使用设备，遇到连接、佩戴、读数、告警或传感器问题。
+    examples: ["GS3 连不上手机", "传感器脱落了"]
+    handler: product_consultant
+    required_slots: [product, issue]
+    clarification_order: [product, issue]
+    direct_handoff: false
+    default_actionability: ready
+  售后诉求:
+    description: 订单、物流、退款、换货、补发、保修、投诉或人工服务。
+    examples: ["我要退款", "订单什么时候发货？"]
+    handler: after_sales
+    required_slots: []
+    clarification_order: []
+    direct_handoff: true
+    default_actionability: ready
+  闲聊:
+    description: 问候或与 CGM 客服无关的内容。
+    examples: ["你好", "今天天气怎么样？"]
+    handler: smalltalk
+    required_slots: []
+    clarification_order: []
+    direct_handoff: false
+    default_actionability: unsupported
