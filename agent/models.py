@@ -42,9 +42,6 @@ ProductEnum = Literal[
     "MetaTwin",
     "硅基手表",
     "硅基健康APP",
-    "Dexcom G7",
-    "FreeStyle Libre",
-    "三诺爱看",
     "CGM",
 ]
 
