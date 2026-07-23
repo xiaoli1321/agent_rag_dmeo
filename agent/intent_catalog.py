@@ -10,6 +10,16 @@ from ..config import DEMO_ROOT
 
 
 @dataclass(frozen=True)
+class SlotDefinition:
+    key: str
+    entity_field: str
+    question: str
+    options: tuple[str, ...]
+    reason: str
+    vague_values: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class IntentDefinition:
     name: str
     description: str
@@ -19,6 +29,23 @@ class IntentDefinition:
     clarification_order: tuple[str, ...]
     direct_handoff: bool
     default_actionability: str
+
+
+@lru_cache(maxsize=1)
+def load_slot_catalog() -> dict[str, SlotDefinition]:
+    payload: dict[str, Any] = yaml.safe_load((DEMO_ROOT / "data" / "intent_catalog.yaml").read_text(encoding="utf-8"))
+    slots_raw = payload.get("slots", {})
+    return {
+        key: SlotDefinition(
+            key=key,
+            entity_field=raw["entity_field"],
+            question=raw["question"],
+            options=tuple(raw.get("options", [])),
+            reason=raw.get("reason", "missing_slot"),
+            vague_values=tuple(raw.get("vague_values", [])),
+        )
+        for key, raw in slots_raw.items()
+    }
 
 
 @lru_cache(maxsize=1)

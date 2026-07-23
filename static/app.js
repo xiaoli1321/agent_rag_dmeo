@@ -178,10 +178,10 @@
     }
 
     function resetStatePanel() {
-      document.querySelector("#state-intent").textContent = "-";
-      document.querySelector("#state-emotion").textContent = "-";
-      document.querySelector("#state-agent").textContent = "-";
-      document.querySelector("#state-status").textContent = "-";
+      document.querySelector("#state-entities").textContent = "-";
+      document.querySelector("#state-missing-slots").textContent = "-";
+      document.querySelector("#state-secondary-intents").textContent = "-";
+      document.querySelector("#state-clarification").textContent = "-";
       document.querySelector("#state-strategy").textContent = "-";
       document.querySelector("#state-reason").textContent = "-";
       document.querySelector("#state-intent").className = "badge";
@@ -447,11 +447,24 @@
 
       document.querySelector("#state-agent").textContent = payload.active_agent || "-";
       document.querySelector("#state-status").textContent = payload.dialogue_status || payload.answer_status || "-";
-      document.querySelector("#state-secondary-intents").textContent = (perception.secondary_intents || []).join("、") || "-";
+
+      // 槽位实体 (Entities) 展现
+      const entities = perception.entities || {};
+      const entityParts = [];
+      if (entities.product) entityParts.push(`产品: ${entities.product}`);
+      if (entities.issue) entityParts.push(`故障/现象: ${entities.issue}`);
+      if (entities.requested_action) entityParts.push(`动作: ${entities.requested_action}`);
+      document.querySelector("#state-entities").textContent = entityParts.length ? entityParts.join(" | ") : "未提取到明确实体";
+
+      // 缺失槽位 (Missing Slots) 展现
       const clarification = perception.clarification || {};
+      const missingSlots = clarification.missing_slots || [];
+      document.querySelector("#state-missing-slots").textContent = missingSlots.length ? missingSlots.join("、") : "无 (槽位已健全)";
+
+      document.querySelector("#state-secondary-intents").textContent = (perception.secondary_intents || []).join("、") || "-";
       document.querySelector("#state-clarification").textContent = clarification.needed
-        ? `${clarification.reason || "信息不足"}：${(clarification.missing_slots || []).join("、")}`
-        : "-";
+        ? `${clarification.reason || "缺少关键槽位"}：${(clarification.missing_slots || []).join("、")}`
+        : "无需澄清";
       document.querySelector("#state-strategy").textContent = payload.debug_trace?.retrieval_strategy || "-";
       const decision = payload.perception_trace?.policy_decision || {};
       document.querySelector("#state-reason").textContent = decision.policy_reason || payload.debug_trace?.evidence_reason || "-";

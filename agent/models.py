@@ -34,9 +34,25 @@ ClarificationReason = Literal[
 DialogueStatus = Literal["ready", "awaiting_clarification", "handed_off", "completed"]
 
 
+ProductEnum = Literal[
+    "GS3",
+    "GS1",
+    "ECO",
+    "KS3",
+    "MetaTwin",
+    "硅基手表",
+    "硅基健康APP",
+    "Dexcom G7",
+    "FreeStyle Libre",
+    "三诺爱看",
+    "CGM",
+]
+
+
 class PerceptionEntities(BaseModel):
-    product: str | None = Field(
-        default=None, description="用户明确提到或已由会话确认的产品/型号。"
+    product: ProductEnum | None = Field(
+        default=None,
+        description="必须属于 ProductEnum 枚举之一。若未提到或非支持产品则置为 null。",
     )
     issue: str | None = Field(
         default=None, description="用户明确描述的故障、现象或咨询属性。"
@@ -98,11 +114,31 @@ class IntentDraft(BaseModel):
             "angry": "愤怒",
         }.get(normalized.get("emotion"), normalized.get("emotion"))
         entities = normalized.get("entities")
-        if isinstance(entities, dict) and "issue" not in entities:
-            normalized["entities"] = {
-                **entities,
-                "issue": entities.get("issue_type") or entities.get("problem"),
-            }
+        if isinstance(entities, dict):
+            if "issue" not in entities:
+                entities["issue"] = entities.get("issue_type") or entities.get("problem")
+            prod = entities.get("product")
+            if isinstance(prod, str) and prod:
+                prod_mapped = {
+                    "gs3": "GS3",
+                    "gs1": "GS1",
+                    "gs1 pro": "GS1",
+                    "eco": "ECO",
+                    "ks3": "KS3",
+                    "metatwin": "MetaTwin",
+                    "硅基手表": "硅基手表",
+                    "siwatch": "硅基手表",
+                    "dexcom": "Dexcom G7",
+                    "dexcom g7": "Dexcom G7",
+                    "g7": "Dexcom G7",
+                    "libre": "FreeStyle Libre",
+                    "三诺": "三诺爱看",
+                    "cgm": "CGM",
+                    "cgm 传感器": "CGM",
+                    "传感器": "CGM",
+                }.get(prod.lower().strip(), prod)
+                entities["product"] = prod_mapped
+            normalized["entities"] = entities
         return normalized
 
     @model_validator(mode="after")
@@ -290,6 +326,7 @@ class AgentState(TypedDict, total=False):
     injected_perception: PerceptionResult
     perception_trace: dict[str, Any]
     active_agent: ActiveAgent
+    empathy_prefix: str | None
     current_topic: str | None
     retrieved_docs: list[RetrievedDoc]
     debug_trace: dict[str, Any]

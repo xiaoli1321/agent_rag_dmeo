@@ -275,6 +275,7 @@ class CustomerAgent:
             return _non_rag_update(answer, dialogue_status="awaiting_clarification")
 
         question = perception.clarification.question or "请再补充一下具体信息。"
+        answer = _prepend_empathy(state, question)
         next_turn = pending.turn_count + 1
         visible_clarification = perception.clarification
         if next_turn == 1:
@@ -296,23 +297,14 @@ class CustomerAgent:
             }
         )
         return {
-            **_non_rag_update(question, dialogue_status="awaiting_clarification"),
+            **_non_rag_update(answer, dialogue_status="awaiting_clarification"),
             "perception": perception,
             "pending_clarification": pending,
         }
 
     def _empathy_agent(self, state: AgentState) -> AgentState | Command:
         """
-        【情绪安抚节点】：
-        当用户情绪为“愤怒”时进入。
-
-        分流逻辑：
-        1. 动态生成【针对性共情 + 解决方案/政策预期】。
-        2. 如果属于【售后诉求/明确要求人工】：
-           - 结合共情话术 + 优先工单摘要，顺畅转交售后节点 (after_sales)。
-        3. 如果属于【产品咨询/使用问题】：
-           - 拼接动态共情话术 + RAG 排查方案，尝试先帮用户解决问题，不强行踢给人工；
-           - 并在结尾保留随时转人工的入口。
+        【情绪安抚节点】：只生成共情上下文，并交给专职节点执行。
         """
         perception = state["perception"]
         user_message = state.get("resolved_user_message") or _last_human_message(
@@ -327,53 +319,28 @@ class CustomerAgent:
             issue=perception.entities.issue,
         )
 
-        # A. 涉及售后/退换货/明确要人工 -> 动态共情 + 高优先级工单 -> 转人工
+        # A. 涉及售后/退换货/明确要人工 -> 交给售后节点生成统一摘要。
         if perception.handoff_requested or perception.intent == "售后诉求":
-            reason = (
-                "用户情绪愤怒且涉及售后诉求，已完成动态共情安抚并生成优先交接工单。"
-            )
-            summary = build_handoff_summary(state, reason=reason)
-            answer = f"{empathy_speech}\n\n已为你转人工并开启优先绿色通道：\n{summary}"
-            return {
+            reason = "用户情绪愤怒且涉及售后诉求，已完成动态共情安抚并生成优先交接工单。"
+            return Command(goto="after_sales", update={
                 "active_agent": "after_sales",
-                "answer": answer,
+                "empathy_prefix": empathy_speech,
                 "handoff_reason": reason,
-                "handoff_summary": summary,
-                "messages": [AIMessage(content=answer)],
-                "dialogue_status": "handed_off",
-                "pending_clarification": None,
-                "answer_status": None,
-                "retrieved_docs": [],
-                "debug_trace": {},
-            }
+            })
 
-        # B. 属于使用问题或产品咨询 -> 不强制转人工！动态共情 + RAG 尝试解答方案！
+        # B. 情绪强烈但信息还不够 -> 共情后交给澄清节点追问一个槽位。
+        if perception.actionability == "needs_clarification":
+            return Command(goto="clarify", update={
+                "active_agent": "clarify",
+                "empathy_prefix": empathy_speech,
+            })
+
+        # C. 产品/使用问题 -> 交给产品节点执行 RAG，不在本节点重复业务逻辑。
         if perception.intent in {"产品咨询", "使用问题"}:
-            if self.rag_fn is not None:
-                result = self.rag_fn(user_message, state.get("current_topic"))
-            else:
-                result = self.rag_service.answer(
-                    user_message, topic_hint=state.get("current_topic")
-                )
-
-            combined_answer = (
-                f"{empathy_speech}\n\n"
-                f"建议您先尝试以下排查步骤：\n{result.answer}\n\n"
-                "💡 如果以上步骤未能解决您的问题，您可以随时回复“转人工”，我会立刻为您安排专员跟进。"
-            )
-            return {
+            return Command(goto="product_consultant", update={
                 "active_agent": "product_consultant",
-                "answer": combined_answer,
-                "answer_status": result.answer_status,
-                "retrieved_docs": result.retrieved_docs,
-                "debug_trace": result.debug_trace,
-                "failed_rag_count": 0,
-                "messages": [AIMessage(content=combined_answer)],
-                "dialogue_status": "completed",
-                "pending_clarification": None,
-                "handoff_reason": None,
-                "handoff_summary": None,
-            }
+                "empathy_prefix": empathy_speech,
+            })
 
         answer = (
             f"{empathy_speech}\n\n您可以补充更多问题细节，或随时回复“转人工”联系专员。"
@@ -413,16 +380,18 @@ class CustomerAgent:
             failed_count += 1
         else:
             failed_count = 0
+        answer = _prepend_empathy(state, result.answer)
         update = {
             "active_agent": "product_consultant",
-            "answer": result.answer,
+            "answer": answer,
             "answer_status": result.answer_status,
             "retrieved_docs": result.retrieved_docs,
             "debug_trace": result.debug_trace,
             "failed_rag_count": failed_count,
-            "messages": [AIMessage(content=result.answer)],
+            "messages": [AIMessage(content=answer)],
             "dialogue_status": "completed",
             "pending_clarification": None,
+            "empathy_prefix": None,
             "handoff_reason": None,
             "handoff_summary": None,
         }
@@ -454,7 +423,7 @@ class CustomerAgent:
         """
         reason = state.get("handoff_reason") or _default_handoff_reason(state)
         summary = build_handoff_summary(state, reason=reason)
-        answer = f"已为你转人工。\n\n{summary}"
+        answer = _prepend_empathy(state, f"已为你转人工。\n\n{summary}")
         return {
             "active_agent": "after_sales",
             "answer": answer,
@@ -463,6 +432,7 @@ class CustomerAgent:
             "messages": [AIMessage(content=answer)],
             "dialogue_status": "handed_off",
             "pending_clarification": None,
+            "empathy_prefix": None,
             "answer_status": None,
             "retrieved_docs": [],
             "debug_trace": {},
@@ -607,8 +577,15 @@ def _non_rag_update(answer: str, *, dialogue_status: str) -> AgentState:
         "debug_trace": {},
         "handoff_reason": None,
         "handoff_summary": None,
+        "empathy_prefix": None,
         "dialogue_status": dialogue_status,  # type: ignore[typeddict-item]
     }
+
+
+def _prepend_empathy(state: AgentState, answer: str) -> str:
+    """Consume the one-turn empathy prefix so later turns do not repeat it."""
+    prefix = (state.get("empathy_prefix") or "").strip()
+    return f"{prefix}\n\n{answer}" if prefix else answer
 
 
 def _map_product_tags_to_topic(product_tags: list[str]) -> str | None:

@@ -15,8 +15,12 @@ from .models import (
     PerceptionEntities,
     PerceptionResult,
 )
-from .intent_catalog import catalog_prompt_context, load_intent_catalog
-from .prompts import load_prompt
+from .intent_catalog import (
+    catalog_prompt_context,
+    load_intent_catalog,
+    load_slot_catalog,
+)
+from .prompts import load_prompt, render_prompt
 from ..config import DemoSettings, get_settings
 
 
@@ -74,18 +78,21 @@ class PerceptionService:
             extra_body=self.settings.llm_extra_body,
         )
         try:
+            system_prompt = render_prompt(
+                "perception.jinja2",
+                intents=load_intent_catalog(),
+                current_topic=current_topic,
+            )
+            human_prompt = (
+                f"最近会话上下文（带角色）：\n{history_text}\n\n当前用户消息：{message}"
+                if history_text != "无"
+                else f"当前用户消息：{message}"
+            )
             structured = chat.with_structured_output(IntentDraft, method="json_mode")
             result = structured.invoke(
                 [
-                    SystemMessage(
-                        content=f"{load_prompt('perception.md')}\n\n当前意图目录：\n{catalog_prompt_context()}"
-                    ),
-                    HumanMessage(
-                        content=(
-                            f"当前已确认产品：{current_topic or '无'}\n"
-                            f"最近会话上下文（带角色）：\n{history_text}\n\n当前用户消息：{message}"
-                        )
-                    ),
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=human_prompt),
                 ]
             )
             return (
@@ -118,9 +125,15 @@ class PerceptionService:
             extra_body=self.settings.llm_extra_body,
         )
         try:
+            system_prompt = render_prompt(
+                "empathy.jinja2",
+                intent=intent,
+                handoff_requested=handoff_requested,
+                issue=issue,
+            )
             res = chat.invoke(
                 [
-                    SystemMessage(content=load_prompt("empathy.md")),
+                    SystemMessage(content=system_prompt),
                     HumanMessage(
                         content=(
                             f"用户意图：{intent}\n"
@@ -225,12 +238,12 @@ def decide_perception(
         "correction",
     }:
         merged = pending_clarification.collected_entities.model_copy(deep=True)
-        for field_name in ("product", "issue", "requested_action"):
-            value = getattr(entities, field_name)
+        for field_name in PerceptionEntities.model_fields:
+            value = getattr(entities, field_name, None)
             if value:
                 setattr(merged, field_name, value)
         missing = pending_clarification.missing_slots[0]
-        resolved = _slot_is_resolved(missing, merged)
+        resolved = _is_slot_resolved(missing, merged)
         if resolved:
             resolved_draft = draft.model_copy(
                 update={"intent": pending_clarification.suspected_intent}
@@ -253,13 +266,7 @@ def decide_perception(
 
     missing = _first_missing_slot(definition, entities)
     if missing:
-        return _clarification_decision(
-            draft,
-            entities,
-            turn_relation,
-            classifier_source,
-            _clarification_slot(missing),
-        )
+        return _clarification_decision(draft, entities, turn_relation, classifier_source, missing)
     return _decision_from_draft(
         draft,
         entities,
@@ -304,55 +311,40 @@ def _clarification_decision(
     classifier_source: str,
     slot: str,
 ) -> PerceptionResult:
-    return PerceptionResult(
+    return _needs_clarification(
         intent=draft.intent,
         emotion=draft.emotion,
         confidence=draft.confidence,
-        handoff_requested=False,
-        secondary_intents=draft.secondary_intents,
-        turn_relation=turn_relation,
-        actionability="needs_clarification",
+        slot=slot,
         entities=entities,
-        clarification=ClarificationDecision(
-            needed=True,
-            reason=_reason_for_slot(slot),
-            missing_slots=[slot],
-            question=_question_for_slot(slot, entities.product),
-            options=_options_for_slot(slot),
-        ),
-        reason="当前问题属于 CGM 范围，但缺少进入下游所需的关键信息。",
-        intent_evidence=draft.evidence,
+        turn_relation=turn_relation,
         classifier_source=classifier_source,
-        policy_reason=f"缺少 {slot}，每轮只追问一个槽位。",
+        evidence=draft.evidence or "",
     )
 
 
 def _first_missing_slot(definition: object, entities: PerceptionEntities) -> str | None:
-    for slot in definition.clarification_order:
-        if slot in definition.required_slots and not getattr(entities, slot):
+    slots_catalog = load_slot_catalog()
+    for slot in getattr(definition, "clarification_order", ()):
+        if slot in getattr(definition, "required_slots", ()) and not _is_slot_resolved(slot, entities):
             return slot
-    return next(
-        (slot for slot in definition.required_slots if not getattr(entities, slot)),
-        None,
-    )
+    for slot in getattr(definition, "required_slots", ()):
+        if not _is_slot_resolved(slot, entities):
+            return slot
+    return None
 
 
-def _clarification_slot(entity_field: str) -> str:
-    return {
-        "product": "target_product",
-        "issue": "problem_detail",
-        "requested_action": "user_goal",
-    }[entity_field]
-
-
-def _slot_is_resolved(slot: str, entities: PerceptionEntities) -> bool:
-    entity_field = {
-        "target_product": "product",
-        "reference_target": "product",
-        "problem_detail": "issue",
-        "user_goal": "requested_action",
-    }[slot]
-    return bool(getattr(entities, entity_field))
+def _is_slot_resolved(slot_key: str, entities: PerceptionEntities) -> bool:
+    slots_catalog = load_slot_catalog()
+    slot_def = slots_catalog.get(slot_key)
+    if not slot_def:
+        return False
+    value = getattr(entities, slot_def.entity_field, None)
+    if not value:
+        return False
+    if slot_def.vague_values and str(value).strip() in slot_def.vague_values:
+        return False
+    return True
 
 
 def _is_medical_out_of_scope(message: str) -> bool:
@@ -519,9 +511,6 @@ def heuristic_perception(
             emotion=emotion,
             confidence=0.61,
             slot="reference_target",
-            reason="ambiguous_reference",
-            question="你说的“这个”具体是哪个产品或型号？",
-            options=["GS3", "Dexcom G7", "硅基手表", "不清楚"],
             entities=PerceptionEntities(issue=issue, requested_action=requested_action),
         )
 
@@ -531,9 +520,6 @@ def heuristic_perception(
             emotion=emotion,
             confidence=0.62,
             slot="target_product",
-            reason="missing_target",
-            question="请问你咨询的是哪个 CGM 产品或设备型号？",
-            options=["GS3", "Dexcom G7", "硅基动感 CGM", "不清楚"],
             entities=PerceptionEntities(issue=issue, requested_action=requested_action),
         )
 
@@ -546,9 +532,6 @@ def heuristic_perception(
             emotion=emotion,
             confidence=0.68,
             slot="problem_detail",
-            reason="missing_detail",
-            question=f"{product or '这个设备'}具体出现了什么问题或表现？",
-            options=["无法连接", "读数异常", "传感器脱落", "其他问题"],
             entities=PerceptionEntities(product=product, requested_action="排障"),
         )
 
@@ -618,17 +601,9 @@ def _classify_clarification_reply(
         entities.requested_action = requested_action
 
     missing_slot = pending_clarification.missing_slots[0]
-    resolved = False
-    if missing_slot in {"target_product", "reference_target"}:
-        resolved = bool(product and product != current_topic) or bool(
-            product and not unclear
-        )
-    elif missing_slot == "problem_detail":
-        resolved = bool(
-            issue and message not in {"坏了", "不行", "有问题", "用不了", "不能用"}
-        )
-    elif missing_slot == "user_goal":
-        resolved = bool(requested_action)
+    resolved = _is_slot_resolved(missing_slot, entities)
+    if resolved and missing_slot in {"target_product", "reference_target"} and product == current_topic and unclear:
+        resolved = False
 
     if resolved and not unclear:
         return PerceptionResult(
@@ -647,9 +622,6 @@ def _classify_clarification_reply(
         emotion=emotion,
         confidence=0.58,
         slot=missing_slot,
-        reason=_reason_for_slot(missing_slot),
-        question=_question_for_slot(missing_slot, entities.product),
-        options=_options_for_slot(missing_slot),
         entities=entities,
         turn_relation="clarification_answer",
     )
@@ -661,12 +633,15 @@ def _needs_clarification(
     emotion: str,
     confidence: float,
     slot: str,
-    reason: str,
-    question: str,
-    options: list[str],
     entities: PerceptionEntities,
     turn_relation: str = "new_request",
+    classifier_source: str = "fallback",
+    evidence: str = "",
 ) -> PerceptionResult:
+    slots_catalog = load_slot_catalog()
+    slot_def = slots_catalog[slot]
+    product_val = entities.product or "这个设备"
+    question = slot_def.question.format(product=product_val) if "{product}" in slot_def.question else slot_def.question
     return PerceptionResult(
         intent=intent,  # type: ignore[arg-type]
         emotion=emotion,  # type: ignore[arg-type]
@@ -677,19 +652,22 @@ def _needs_clarification(
         entities=entities,
         clarification=ClarificationDecision(
             needed=True,
-            reason=reason,  # type: ignore[arg-type]
+            reason=slot_def.reason,  # type: ignore[arg-type]
             missing_slots=[slot],  # type: ignore[list-item]
             question=question,
-            options=options,
+            options=list(slot_def.options),
         ),
         reason="当前问题属于 CGM 范围，但缺少进入下游所需的关键信息。",
+        intent_evidence=evidence,
+        classifier_source=classifier_source,
+        policy_reason=f"缺少 {slot}，每轮只追问一个槽位。",
     )
 
 
 def _extract_product(message: str) -> str | None:
     lowered = message.lower()
     products = (
-        ("gs1 pro", "GS1 Pro"),
+        ("gs1 pro", "GS1"),
         ("gs3", "GS3"),
         ("gs1", "GS1"),
         ("eco", "ECO"),
@@ -699,15 +677,15 @@ def _extract_product(message: str) -> str | None:
         ("g7", "Dexcom G7"),
         ("libre", "FreeStyle Libre"),
         ("硅基手表", "硅基手表"),
-        ("健康app", "硅基动感健康APP"),
-        ("三诺", "三诺爱看 CGM"),
-        ("硅基", "硅基动感 CGM"),
+        ("健康app", "硅基健康APP"),
+        ("三诺", "三诺爱看"),
+        ("硅基", "CGM"),
         ("cgm", "CGM"),
-        ("传感器", "CGM 传感器"),
+        ("传感器", "CGM"),
     )
     for keyword, product in products:
         if keyword in lowered:
-            return product
+            return product  # type: ignore[return-value]
     return None
 
 
@@ -728,33 +706,6 @@ def _extract_requested_action(message: str) -> str | None:
     if any(word in message for word in ("退款", "换货", "退货", "补发", "保修")):
         return "办理售后"
     return None
-
-
-def _reason_for_slot(slot: str) -> str:
-    return {
-        "reference_target": "ambiguous_reference",
-        "target_product": "missing_target",
-        "user_goal": "missing_goal",
-        "problem_detail": "missing_detail",
-    }[slot]
-
-
-def _question_for_slot(slot: str, product: str | None) -> str:
-    return {
-        "reference_target": "你说的“这个”具体是哪个产品或型号？",
-        "target_product": "请问你咨询的是哪个 CGM 产品或设备型号？",
-        "user_goal": "你希望查询产品信息、排查使用问题，还是办理售后？",
-        "problem_detail": f"{product or '这个设备'}具体出现了什么问题或表现？",
-    }[slot]
-
-
-def _options_for_slot(slot: str) -> list[str]:
-    return {
-        "reference_target": ["GS3", "Dexcom G7", "硅基手表", "不清楚"],
-        "target_product": ["GS3", "Dexcom G7", "硅基动感 CGM", "不清楚"],
-        "user_goal": ["查询产品信息", "排查使用问题", "办理售后", "不清楚"],
-        "problem_detail": ["无法连接", "读数异常", "传感器脱落", "其他问题"],
-    }[slot]
 
 
 def run_stability_experiment(

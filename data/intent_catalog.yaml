@@ -1,3 +1,26 @@
+slots:
+  target_product:
+    entity_field: product
+    question: "请问你咨询的是哪个 CGM 产品或设备型号？"
+    options: ["GS3", "Dexcom G7", "硅基动感 CGM", "不清楚"]
+    reason: missing_target
+  reference_target:
+    entity_field: product
+    question: "你说的“这个”具体是哪个产品或型号？"
+    options: ["GS3", "Dexcom G7", "硅基手表", "不清楚"]
+    reason: ambiguous_reference
+  problem_detail:
+    entity_field: issue
+    question: "{product}具体出现了什么问题或表现？"
+    options: ["无法连接", "读数异常", "传感器脱落", "其他问题"]
+    reason: missing_detail
+    vague_values: ["坏了", "不行", "有问题", "用不了", "不能用"]
+  user_goal:
+    entity_field: requested_action
+    question: "你希望查询产品信息、排查使用问题，还是办理售后？"
+    options: ["查询产品信息", "排查使用问题", "办理售后", "不清楚"]
+    reason: missing_goal
+
 intents:
   产品咨询:
     description: 询问 CGM 功能、规格、兼容性、防水、佩戴、校准或读数原理等知识。
@@ -11,8 +34,8 @@ intents:
     description: 已在使用设备，遇到连接、佩戴、读数、告警或传感器问题。
     examples: ["GS3 连不上手机", "传感器脱落了"]
     handler: product_consultant
-    required_slots: [product, issue]
-    clarification_order: [product, issue]
+    required_slots: [target_product, problem_detail]
+    clarification_order: [target_product, problem_detail]
     direct_handoff: false
     default_actionability: ready
   售后诉求:

@@ -401,6 +401,23 @@ def test_angry_usage_question_keeps_automatic_product_route() -> None:
     assert result["answer_status"] == "grounded"
 
 
+def test_angry_rag_failures_still_escalate_through_product_node() -> None:
+    agent = CustomerAgent(
+        settings=_offline_settings(),
+        perception_fn=_perception(intent="使用问题", emotion="愤怒"),
+        rag_fn=_insufficient_rag,
+    )
+    thread_id = "angry-rag-escalation"
+
+    first = agent.invoke("GS3 读数不准，太差了", thread_id=thread_id)
+    second = agent.invoke("还是不行，太差了", thread_id=thread_id)
+
+    assert first["active_agent"] == "product_consultant"
+    assert first["failed_rag_count"] == 1
+    assert second["active_agent"] == "after_sales"
+    assert "RAG 连续两次未找到足够依据" in second["handoff_reason"]
+
+
 def test_perception_trace_exposes_semantics_and_policy() -> None:
     agent = CustomerAgent(settings=_offline_settings(), rag_fn=_grounded_rag)
     result = agent.invoke("CGM 是什么？", thread_id="perception-trace")

@@ -132,7 +132,7 @@ def write_markdown_report(rows: list[dict], output_path: Path) -> None:
 
 
 def run_live_eval(cases: list[EvalCase]) -> list[dict]:
-    from ..graph import CustomerAgent, new_thread_id
+    from .graph import CustomerAgent, new_thread_id
 
     agent = CustomerAgent()
 
