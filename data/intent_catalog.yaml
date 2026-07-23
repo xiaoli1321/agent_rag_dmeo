@@ -26,8 +26,8 @@ intents:
     description: 询问 CGM 功能、规格、兼容性、防水、佩戴、校准或读数原理等知识。
     examples: ["CGM 是什么？", "GS3 防水吗？"]
     handler: product_consultant
-    required_slots: []
-    clarification_order: []
+    required_slots: [target_product]
+    clarification_order: [target_product]
     direct_handoff: false
     default_actionability: ready
   使用问题:

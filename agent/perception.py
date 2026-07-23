@@ -267,7 +267,7 @@ def decide_perception(
         )
 
     missing = _first_missing_slot(definition, entities)
-    if missing:
+    if missing and not (draft.is_general_query and missing == "target_product"):
         return _clarification_decision(draft, entities, turn_relation, classifier_source, missing)
     return _decision_from_draft(
         draft,
