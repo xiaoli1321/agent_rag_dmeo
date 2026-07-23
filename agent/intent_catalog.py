@@ -23,11 +23,16 @@ class IntentDefinition:
 
 @lru_cache(maxsize=1)
 def load_intent_catalog() -> dict[str, IntentDefinition]:
-    payload: dict[str, Any] = yaml.safe_load((DEMO_ROOT / "data" / "intent_catalog.yaml").read_text(encoding="utf-8"))
+    payload: dict[str, Any] = yaml.safe_load(
+        (DEMO_ROOT / "data" / "intent_catalog.yaml").read_text(encoding="utf-8")
+    )
     return {
         name: IntentDefinition(
-            name=name, description=raw["description"], examples=tuple(raw.get("examples", [])),
-            handler=raw["handler"], required_slots=tuple(raw.get("required_slots", [])),
+            name=name,
+            description=raw["description"],
+            examples=tuple(raw.get("examples", [])),
+            handler=raw["handler"],
+            required_slots=tuple(raw.get("required_slots", [])),
             clarification_order=tuple(raw.get("clarification_order", [])),
             direct_handoff=bool(raw.get("direct_handoff", False)),
             default_actionability=raw.get("default_actionability", "ready"),

@@ -52,8 +52,15 @@ def _grounded_rag(question: str, topic: str | None) -> RagResult:
         answer="可以戴着洗澡。\n\n引用：\n[1] Dexcom G7 FAQ - https://example.com - chunk #0",
         answer_status="grounded",
         retrieved_docs=docs,
-        evidence_decision=EvidenceDecision(status="grounded", reason="test", top_score=0.9),
-        debug_trace={"top_k": 4, "min_score": 0.35, "evidence_reason": "test", "final_hits": []},
+        evidence_decision=EvidenceDecision(
+            status="grounded", reason="test", top_score=0.9
+        ),
+        debug_trace={
+            "top_k": 4,
+            "min_score": 0.35,
+            "evidence_reason": "test",
+            "final_hits": [],
+        },
     )
 
 
@@ -62,8 +69,15 @@ def _insufficient_rag(question: str, topic: str | None) -> RagResult:
         answer=INSUFFICIENT_EVIDENCE_ANSWER,
         answer_status="insufficient_evidence",
         retrieved_docs=[],
-        evidence_decision=EvidenceDecision(status="insufficient_evidence", reason="test", top_score=None),
-        debug_trace={"top_k": 4, "min_score": 0.35, "evidence_reason": "test", "final_hits": []},
+        evidence_decision=EvidenceDecision(
+            status="insufficient_evidence", reason="test", top_score=None
+        ),
+        debug_trace={
+            "top_k": 4,
+            "min_score": 0.35,
+            "evidence_reason": "test",
+            "final_hits": [],
+        },
     )
 
 
@@ -119,10 +133,14 @@ def test_rag_structured_prompts_render_without_consuming_json_examples() -> None
 
 
 def test_intent_draft_normalizes_common_dashscope_json_variants() -> None:
-    draft = IntentDraft.model_validate({
-        "intent": "troubleshooting", "emotion": "frustrated", "confidence": 0.9,
-        "entities": {"product": "GS1", "issue_type": "connection"},
-    })
+    draft = IntentDraft.model_validate(
+        {
+            "intent": "troubleshooting",
+            "emotion": "frustrated",
+            "confidence": 0.9,
+            "entities": {"product": "GS1", "issue_type": "connection"},
+        }
+    )
 
     assert draft.intent == "使用问题"
     assert draft.emotion == "不满"
@@ -130,13 +148,19 @@ def test_intent_draft_normalizes_common_dashscope_json_variants() -> None:
 
 
 def test_blank_llm_entity_is_a_missing_slot_and_routes_to_clarification() -> None:
-    draft = IntentDraft.model_validate({
-        "intent": "使用问题",
-        "emotion": "平静",
-        "confidence": 0.95,
-        "entities": {"product": "   ", "issue": "蓝牙连接不上", "requested_action": "排障"},
-        "evidence": "蓝牙连接不上",
-    })
+    draft = IntentDraft.model_validate(
+        {
+            "intent": "使用问题",
+            "emotion": "平静",
+            "confidence": 0.95,
+            "entities": {
+                "product": "   ",
+                "issue": "蓝牙连接不上",
+                "requested_action": "排障",
+            },
+            "evidence": "蓝牙连接不上",
+        }
+    )
 
     result = decide_perception(
         draft,
@@ -152,14 +176,18 @@ def test_blank_llm_entity_is_a_missing_slot_and_routes_to_clarification() -> Non
     assert result.clarification.missing_slots == ["target_product"]
 
 
-def test_vague_failure_overrides_llm_aftersales_guess_until_detail_is_collected() -> None:
-    draft = IntentDraft.model_validate({
-        "intent": "售后诉求",
-        "emotion": "平静",
-        "confidence": 0.9,
-        "entities": {"product": "GS3", "issue": "设备损坏"},
-        "evidence": "GS3 坏了",
-    })
+def test_vague_failure_overrides_llm_aftersales_guess_until_detail_is_collected() -> (
+    None
+):
+    draft = IntentDraft.model_validate(
+        {
+            "intent": "售后诉求",
+            "emotion": "平静",
+            "confidence": 0.9,
+            "entities": {"product": "GS3", "issue": "设备损坏"},
+            "evidence": "GS3 坏了",
+        }
+    )
 
     result = decide_perception(
         draft,
@@ -190,7 +218,9 @@ def test_heuristic_perception_marks_explicit_frustration_as_dissatisfied() -> No
 
 
 def test_product_question_routes_to_rag() -> None:
-    agent = CustomerAgent(perception_fn=_perception(intent="产品咨询"), rag_fn=_grounded_rag)
+    agent = CustomerAgent(
+        perception_fn=_perception(intent="产品咨询"), rag_fn=_grounded_rag
+    )
 
     result = agent.invoke("Dexcom G7 可以戴着洗澡吗？", thread_id="product-route")
 
@@ -203,7 +233,9 @@ def test_product_question_routes_to_rag() -> None:
 
 def test_angry_message_routes_to_empathy_then_handoff() -> None:
     agent = CustomerAgent(
-        perception_fn=_perception(intent="使用问题", emotion="愤怒", handoff_requested=True),
+        perception_fn=_perception(
+            intent="使用问题", emotion="愤怒", handoff_requested=True
+        ),
         rag_fn=_grounded_rag,
     )
 
@@ -217,7 +249,9 @@ def test_angry_message_routes_to_empathy_then_handoff() -> None:
 
 def test_active_handoff_routes_directly_to_handoff() -> None:
     agent = CustomerAgent(
-        perception_fn=_perception(intent="售后诉求", emotion="平静", handoff_requested=True),
+        perception_fn=_perception(
+            intent="售后诉求", emotion="平静", handoff_requested=True
+        ),
         rag_fn=_grounded_rag,
     )
 
@@ -229,7 +263,9 @@ def test_active_handoff_routes_directly_to_handoff() -> None:
 
 
 def test_two_rag_failures_trigger_product_to_after_sales_handoff() -> None:
-    agent = CustomerAgent(perception_fn=_perception(intent="产品咨询"), rag_fn=_insufficient_rag)
+    agent = CustomerAgent(
+        perception_fn=_perception(intent="产品咨询"), rag_fn=_insufficient_rag
+    )
     thread_id = "two-rag-failures"
 
     first = agent.invoke("连接码是几位数？", thread_id=thread_id)
@@ -349,7 +385,10 @@ def test_medical_emergency_expression_is_out_of_scope_and_never_retrieved() -> N
     result = agent.invoke("低血糖昏迷了怎么办？", thread_id="medical-boundary")
 
     assert result["perception"].actionability == "unsupported"
-    assert result["active_agent"] == "product_consultant" or result["answer_status"] is None
+    assert (
+        result["active_agent"] == "product_consultant"
+        or result["answer_status"] is None
+    )
     assert calls == []
 
 

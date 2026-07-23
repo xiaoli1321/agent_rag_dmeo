@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
 
 from .models import RetrievedDoc
 from ..ingest.pipeline import clean_documents, load_sources, split_documents
@@ -135,20 +137,20 @@ class HybridRetriever:
 class LocalSparseRetriever:
     def __init__(self, docs: list[RetrievedDoc] | None = None) -> None:
         self.docs = docs if docs is not None else _load_local_docs()
-        self.doc_tokens = [
-            _tokenize(
-                doc.chunk_text
-                + " "
-                + doc.source_title
-                + " "
-                + " ".join(doc.product_tags)
+        self._bm25: BM25Retriever | None = None
+
+    def _get_bm25(self, top_k: int) -> BM25Retriever:
+        """Lazy-initialize and return the BM25Retriever."""
+        if self._bm25 is None:
+            self._bm25 = BM25Retriever.from_documents(
+                documents=[
+                    Document(page_content=doc.chunk_text, metadata={"doc": doc})
+                    for doc in self.docs
+                ],
+                k=top_k * 3,
+                preprocess_func=_preprocess,
             )
-            for doc in self.docs
-        ]
-        self.doc_freq: dict[str, int] = {}
-        for tokens in self.doc_tokens:
-            for token in set(tokens):
-                self.doc_freq[token] = self.doc_freq.get(token, 0) + 1
+        return self._bm25
 
     def search(
         self, query: str, *, top_k: int, product_tags: list[str] | None = None
@@ -156,24 +158,26 @@ class LocalSparseRetriever:
         query_tokens = _tokenize(query)
         if not query_tokens:
             return []
+
+        bm25 = self._get_bm25(top_k)
+        results = bm25.invoke(query)
+        if not results:
+            return []
+
+        # Get raw BM25 scores from the internal model for accurate scoring
+        all_scores = bm25.vectorizer.get_scores(query_tokens)
+        score_map: dict[int, float] = {}
+        for i, bm25_doc in enumerate(bm25.docs):
+            score_map[id(bm25_doc.metadata["doc"])] = float(all_scores[i])
+
         hits: list[SparseHit] = []
-        total_docs = max(1, len(self.docs))
-        for doc, tokens in zip(self.docs, self.doc_tokens):
+        for doc_result in results:
+            doc: RetrievedDoc = doc_result.metadata["doc"]
             if product_tags and not set(product_tags).intersection(doc.product_tags):
                 continue
-            score = 0.0
-            token_count = max(1, len(tokens))
-            for token in query_tokens:
-                tf = tokens.count(token) / token_count
-                if tf == 0:
-                    continue
-                idf = math.log((1 + total_docs) / (1 + self.doc_freq.get(token, 0))) + 1
-                score += tf * idf
-            if score > 0:
-                chunk_id = doc.chunk_id or doc.source_url
-                hits.append(
-                    SparseHit(chunk_id=chunk_id, score=round(score, 6), doc=doc)
-                )
+            chunk_id = doc.chunk_id or doc.source_url
+            score = score_map.get(id(doc), 0.0)
+            hits.append(SparseHit(chunk_id=chunk_id, score=round(score, 6), doc=doc))
         hits.sort(key=lambda item: item.score, reverse=True)
         return hits[:top_k]
 
@@ -238,6 +242,11 @@ def _load_local_docs() -> list[RetrievedDoc]:
             )
         )
     return docs
+
+
+def _preprocess(text: str) -> list[str]:
+    """Tokenize text for BM25Retriever (same logic as _tokenize)."""
+    return [m.group(0).lower() for m in TOKEN_PATTERN.finditer(text)]
 
 
 def _tokenize(text: str) -> list[str]:

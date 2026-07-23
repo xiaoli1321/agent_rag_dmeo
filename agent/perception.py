@@ -39,7 +39,9 @@ class PerceptionService:
         separate nodes. Keeping this wrapper avoids breaking callers outside the
         graph while making policy deterministic in the new path.
         """
-        draft, source = self.classify_draft(message, history, current_topic=current_topic)
+        draft, source = self.classify_draft(
+            message, history, current_topic=current_topic
+        )
         return decide_perception(
             draft,
             message=message,
@@ -59,7 +61,9 @@ class PerceptionService:
         if not self.settings.llm_configured:
             return heuristic_draft(message, current_topic=current_topic), "fallback"
 
-        history_rows = list(history or [])[-self.settings.agent_perception_history_turns :]
+        history_rows = list(history or [])[
+            -self.settings.agent_perception_history_turns :
+        ]
         history_text = "\n".join(history_rows) or "无"
         chat = ChatOpenAI(
             api_key=self.settings.llm_api_key,
@@ -73,7 +77,9 @@ class PerceptionService:
             structured = chat.with_structured_output(IntentDraft, method="json_mode")
             result = structured.invoke(
                 [
-                    SystemMessage(content=f"{load_prompt('perception.md')}\n\n当前意图目录：\n{catalog_prompt_context()}"),
+                    SystemMessage(
+                        content=f"{load_prompt('perception.md')}\n\n当前意图目录：\n{catalog_prompt_context()}"
+                    ),
                     HumanMessage(
                         content=(
                             f"当前已确认产品：{current_topic or '无'}\n"
@@ -82,9 +88,13 @@ class PerceptionService:
                     ),
                 ]
             )
-            return (result if isinstance(result, IntentDraft) else IntentDraft.model_validate(result)), "llm"
-        except Exception as exc:
-            raise RuntimeError("LLM intent classification failed") from exc
+            return (
+                result
+                if isinstance(result, IntentDraft)
+                else IntentDraft.model_validate(result)
+            ), "llm"
+        except Exception:
+            return heuristic_draft(message, current_topic=current_topic), "fallback"
 
     def generate_empathy(
         self,
@@ -95,7 +105,9 @@ class PerceptionService:
         issue: str | None = None,
     ) -> str:
         if not self.settings.llm_configured:
-            return heuristic_empathy(message, intent=intent, handoff_requested=handoff_requested, issue=issue)
+            return heuristic_empathy(
+                message, intent=intent, handoff_requested=handoff_requested, issue=issue
+            )
 
         chat = ChatOpenAI(
             api_key=self.settings.llm_api_key,
@@ -131,7 +143,9 @@ def heuristic_empathy(
     handoff_requested: bool = False,
     issue: str | None = None,
 ) -> str:
-    pain_point = issue or ("退换货与售后问题" if intent == "售后诉求" else "设备使用遇到的不便")
+    pain_point = issue or (
+        "退换货与售后问题" if intent == "售后诉求" else "设备使用遇到的不便"
+    )
     if handoff_requested or intent == "售后诉求":
         return (
             f"非常理解您遇到【{pain_point}】时的焦虑与不满，换作是我也会非常着急。"
@@ -143,7 +157,6 @@ def heuristic_empathy(
     )
 
 
-
 def heuristic_draft(message: str, *, current_topic: str | None = None) -> IntentDraft:
     """Convert the deterministic local classifier into the same semantic contract."""
     result = heuristic_perception(message, current_topic=current_topic)
@@ -153,7 +166,8 @@ def heuristic_draft(message: str, *, current_topic: str | None = None) -> Intent
         confidence=result.confidence,
         handoff_requested=result.handoff_requested,
         secondary_intents=result.secondary_intents,
-        entities=result.entities.model_copy(deep=True), evidence=result.reason,
+        entities=result.entities.model_copy(deep=True),
+        evidence=result.reason,
         is_greeting=result.intent == "闲聊" and result.actionability == "ready",
     )
 
@@ -170,10 +184,16 @@ def decide_perception(
     """Apply business policy after semantic understanding; this is intentionally model-free."""
     if _is_medical_out_of_scope(message):
         return PerceptionResult(
-            intent="闲聊", emotion=draft.emotion, confidence=1.0, handoff_requested=False,
-            turn_relation=turn_relation, actionability="unsupported", entities=PerceptionEntities(),
+            intent="闲聊",
+            emotion=draft.emotion,
+            confidence=1.0,
+            handoff_requested=False,
+            turn_relation=turn_relation,
+            actionability="unsupported",
+            entities=PerceptionEntities(),
             reason="医疗紧急或诊疗表达不在当前 CGM 客服 Demo 能力范围内。",
-            intent_evidence=message[:120], classifier_source=classifier_source,
+            intent_evidence=message[:120],
+            classifier_source=classifier_source,
             policy_reason="医疗风险按已确认边界作为域外问题处理，不进入 RAG 或售后。",
         )
     entities = draft.entities.model_copy(deep=True)
@@ -192,11 +212,18 @@ def decide_perception(
 
     if draft.handoff_requested or definition.direct_handoff:
         return _decision_from_draft(
-            draft, entities, turn_relation, classifier_source,
-            actionability="ready", policy_reason="意图目录声明为直接人工交接。",
+            draft,
+            entities,
+            turn_relation,
+            classifier_source,
+            actionability="ready",
+            policy_reason="意图目录声明为直接人工交接。",
         )
 
-    if pending_clarification and turn_relation in {"clarification_answer", "correction"}:
+    if pending_clarification and turn_relation in {
+        "clarification_answer",
+        "correction",
+    }:
         merged = pending_clarification.collected_entities.model_copy(deep=True)
         for field_name in ("product", "issue", "requested_action"):
             value = getattr(entities, field_name)
@@ -205,49 +232,97 @@ def decide_perception(
         missing = pending_clarification.missing_slots[0]
         resolved = _slot_is_resolved(missing, merged)
         if resolved:
-            resolved_draft = draft.model_copy(update={"intent": pending_clarification.suspected_intent})
+            resolved_draft = draft.model_copy(
+                update={"intent": pending_clarification.suspected_intent}
+            )
             return _decision_from_draft(
-                resolved_draft, merged, turn_relation, classifier_source,
-                actionability="ready", policy_reason="用户已补齐上一轮唯一缺失槽位。",
+                resolved_draft,
+                merged,
+                turn_relation,
+                classifier_source,
+                actionability="ready",
+                policy_reason="用户已补齐上一轮唯一缺失槽位。",
             )
         return _clarification_decision(
-            draft.model_copy(update={"intent": pending_clarification.suspected_intent}), merged,
-            turn_relation, classifier_source, missing,
+            draft.model_copy(update={"intent": pending_clarification.suspected_intent}),
+            merged,
+            turn_relation,
+            classifier_source,
+            missing,
         )
 
     missing = _first_missing_slot(definition, entities)
     if missing:
-        return _clarification_decision(draft, entities, turn_relation, classifier_source, _clarification_slot(missing))
+        return _clarification_decision(
+            draft,
+            entities,
+            turn_relation,
+            classifier_source,
+            _clarification_slot(missing),
+        )
     return _decision_from_draft(
-        draft, entities, turn_relation, classifier_source,
-        actionability="ready" if draft.is_greeting else definition.default_actionability,
+        draft,
+        entities,
+        turn_relation,
+        classifier_source,
+        actionability="ready"
+        if draft.is_greeting
+        else definition.default_actionability,
         policy_reason="意图目录的必填槽位已满足，按目录声明的处理器执行。",
     )
 
 
 def _decision_from_draft(
-    draft: IntentDraft, entities: PerceptionEntities, turn_relation: str,
-    classifier_source: str, *, actionability: str, policy_reason: str,
+    draft: IntentDraft,
+    entities: PerceptionEntities,
+    turn_relation: str,
+    classifier_source: str,
+    *,
+    actionability: str,
+    policy_reason: str,
 ) -> PerceptionResult:
     return PerceptionResult(
-        intent=draft.intent, emotion=draft.emotion, confidence=draft.confidence,
-        handoff_requested=draft.handoff_requested, secondary_intents=draft.secondary_intents,
-        turn_relation=turn_relation, actionability=actionability, entities=entities,
-        reason=draft.evidence or policy_reason, intent_evidence=draft.evidence,
-        classifier_source=classifier_source, policy_reason=policy_reason,
+        intent=draft.intent,
+        emotion=draft.emotion,
+        confidence=draft.confidence,
+        handoff_requested=draft.handoff_requested,
+        secondary_intents=draft.secondary_intents,
+        turn_relation=turn_relation,
+        actionability=actionability,
+        entities=entities,
+        reason=draft.evidence or policy_reason,
+        intent_evidence=draft.evidence,
+        classifier_source=classifier_source,
+        policy_reason=policy_reason,
     )
 
 
-def _clarification_decision(draft: IntentDraft, entities: PerceptionEntities, turn_relation: str,
-                            classifier_source: str, slot: str) -> PerceptionResult:
+def _clarification_decision(
+    draft: IntentDraft,
+    entities: PerceptionEntities,
+    turn_relation: str,
+    classifier_source: str,
+    slot: str,
+) -> PerceptionResult:
     return PerceptionResult(
-        intent=draft.intent, emotion=draft.emotion, confidence=draft.confidence,
-        handoff_requested=False, secondary_intents=draft.secondary_intents,
-        turn_relation=turn_relation, actionability="needs_clarification", entities=entities,
-        clarification=ClarificationDecision(needed=True, reason=_reason_for_slot(slot),
-            missing_slots=[slot], question=_question_for_slot(slot, entities.product), options=_options_for_slot(slot)),
+        intent=draft.intent,
+        emotion=draft.emotion,
+        confidence=draft.confidence,
+        handoff_requested=False,
+        secondary_intents=draft.secondary_intents,
+        turn_relation=turn_relation,
+        actionability="needs_clarification",
+        entities=entities,
+        clarification=ClarificationDecision(
+            needed=True,
+            reason=_reason_for_slot(slot),
+            missing_slots=[slot],
+            question=_question_for_slot(slot, entities.product),
+            options=_options_for_slot(slot),
+        ),
         reason="当前问题属于 CGM 范围，但缺少进入下游所需的关键信息。",
-        intent_evidence=draft.evidence, classifier_source=classifier_source,
+        intent_evidence=draft.evidence,
+        classifier_source=classifier_source,
         policy_reason=f"缺少 {slot}，每轮只追问一个槽位。",
     )
 
@@ -256,11 +331,18 @@ def _first_missing_slot(definition: object, entities: PerceptionEntities) -> str
     for slot in definition.clarification_order:
         if slot in definition.required_slots and not getattr(entities, slot):
             return slot
-    return next((slot for slot in definition.required_slots if not getattr(entities, slot)), None)
+    return next(
+        (slot for slot in definition.required_slots if not getattr(entities, slot)),
+        None,
+    )
 
 
 def _clarification_slot(entity_field: str) -> str:
-    return {"product": "target_product", "issue": "problem_detail", "requested_action": "user_goal"}[entity_field]
+    return {
+        "product": "target_product",
+        "issue": "problem_detail",
+        "requested_action": "user_goal",
+    }[entity_field]
 
 
 def _slot_is_resolved(slot: str, entities: PerceptionEntities) -> bool:
@@ -274,15 +356,35 @@ def _slot_is_resolved(slot: str, entities: PerceptionEntities) -> bool:
 
 
 def _is_medical_out_of_scope(message: str) -> bool:
-    return any(marker in message for marker in ("低血糖昏迷", "昏迷", "出血", "严重过敏", "呼吸困难", "急救"))
+    return any(
+        marker in message
+        for marker in ("低血糖昏迷", "昏迷", "出血", "严重过敏", "呼吸困难", "急救")
+    )
 
 
 def _is_vague_device_issue(message: str) -> bool:
-    return any(marker in message.strip().lower() for marker in ("坏了", "不行", "有问题", "用不了", "不能用"))
+    return any(
+        marker in message.strip().lower()
+        for marker in ("坏了", "不行", "有问题", "用不了", "不能用")
+    )
 
 
 def _has_explicit_handoff_request(message: str) -> bool:
-    return any(marker in message for marker in ("人工", "客服", "坐席", "投诉", "退款", "赔偿", "换货", "退货", "补发", "保修"))
+    return any(
+        marker in message
+        for marker in (
+            "人工",
+            "客服",
+            "坐席",
+            "投诉",
+            "退款",
+            "赔偿",
+            "换货",
+            "退货",
+            "补发",
+            "保修",
+        )
+    )
 
 
 def heuristic_perception(
@@ -408,7 +510,9 @@ def heuristic_perception(
         )
 
     pronouns = ("这个", "那个", "它", "该设备", "这款")
-    has_ambiguous_reference = any(word in stripped for word in pronouns) and not current_topic
+    has_ambiguous_reference = (
+        any(word in stripped for word in pronouns) and not current_topic
+    )
     if has_ambiguous_reference and (has_usage or has_product or "怎么" in stripped):
         return _needs_clarification(
             intent="使用问题" if (has_usage or "怎么" in stripped) else "产品咨询",
@@ -434,7 +538,8 @@ def heuristic_perception(
         )
 
     if intent == "使用问题" and (
-        stripped in vague_issue_words or (product is not None and issue in vague_issue_words)
+        stripped in vague_issue_words
+        or (product is not None and issue in vague_issue_words)
     ):
         return _needs_clarification(
             intent="使用问题",
@@ -483,11 +588,17 @@ def _classify_clarification_reply(
     requested_action: str | None,
     unclear: bool,
 ) -> PerceptionResult:
-    if product and any(marker in message for marker in ("吗", "怎么", "多少", "几", "能不能", "可以")):
-        fresh = heuristic_perception(message, current_topic=None, pending_clarification=None)
+    if product and any(
+        marker in message for marker in ("吗", "怎么", "多少", "几", "能不能", "可以")
+    ):
+        fresh = heuristic_perception(
+            message, current_topic=None, pending_clarification=None
+        )
         fresh.turn_relation = "new_request"
         return fresh
-    if any(marker in message for marker in ("天气", "新闻", "写代码", "讲故事", "股票")):
+    if any(
+        marker in message for marker in ("天气", "新闻", "写代码", "讲故事", "股票")
+    ):
         return PerceptionResult(
             intent="闲聊",
             emotion=emotion,  # type: ignore[arg-type]
@@ -509,9 +620,13 @@ def _classify_clarification_reply(
     missing_slot = pending_clarification.missing_slots[0]
     resolved = False
     if missing_slot in {"target_product", "reference_target"}:
-        resolved = bool(product and product != current_topic) or bool(product and not unclear)
+        resolved = bool(product and product != current_topic) or bool(
+            product and not unclear
+        )
     elif missing_slot == "problem_detail":
-        resolved = bool(issue and message not in {"坏了", "不行", "有问题", "用不了", "不能用"})
+        resolved = bool(
+            issue and message not in {"坏了", "不行", "有问题", "用不了", "不能用"}
+        )
     elif missing_slot == "user_goal":
         resolved = bool(requested_action)
 
@@ -596,7 +711,9 @@ def _extract_product(message: str) -> str | None:
     return None
 
 
-def _extract_issue(message: str, usage_words: tuple[str, ...], product_words: tuple[str, ...]) -> str | None:
+def _extract_issue(
+    message: str, usage_words: tuple[str, ...], product_words: tuple[str, ...]
+) -> str | None:
     for word in usage_words + product_words:
         if word in message.lower():
             return word

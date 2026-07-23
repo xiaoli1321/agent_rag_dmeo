@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Callable
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -20,7 +24,7 @@ from .models import (
     RetrievedDoc,
 )
 from .perception import PerceptionService, decide_perception
-from .rag import RagService
+from .rag import RagService, RagSubgraphState, build_rag_subgraph
 from .run_logger import AgentRunLogger
 from ..config import DemoSettings, get_settings
 
@@ -42,15 +46,19 @@ class CustomerAgent:
     - 对外暴露 invoke() 作为唯一入口
     - 自动记录每次对话的延迟和运行日志
     """
+
     settings: DemoSettings = field(default_factory=get_settings)
-    perception_fn: PerceptionFn | None = None      # 可注入的外部感知函数（方便测试时 mock）
-    rag_fn: RagFn | None = None                     # 可注入的外部 RAG 函数（方便测试时 mock）
-    checkpointer: InMemorySaver = field(default_factory=InMemorySaver)  # LangGraph 内存检查点，用于多轮对话状态管理
+    perception_fn: PerceptionFn | None = None  # 可注入的外部感知函数（方便测试时 mock）
+    rag_fn: RagFn | None = None  # 可注入的外部 RAG 函数（方便测试时 mock）
+    checkpointer: InMemorySaver = field(
+        default_factory=InMemorySaver
+    )  # LangGraph 内存检查点，用于多轮对话状态管理
 
     def __post_init__(self) -> None:
         """初始化各个服务组件并编译 LangGraph"""
         self.perception_service = PerceptionService(settings=self.settings)
         self.rag_service = RagService(settings=self.settings)
+        self.rag_subgraph = build_rag_subgraph(self.settings, self.rag_service)
         self.run_logger = AgentRunLogger(
             enabled=self.settings.agent_run_log_enabled,
             log_dir=self.settings.agent_run_log_dir,
@@ -67,7 +75,9 @@ class CustomerAgent:
         resolved_thread_id = thread_id or "demo-thread"
         config = {"configurable": {"thread_id": resolved_thread_id}}
         started = perf_counter()
-        result = self.graph.invoke({"messages": [HumanMessage(content=user_message)]}, config=config)
+        result = self.graph.invoke(
+            {"messages": [HumanMessage(content=user_message)]}, config=config
+        )
         latency_ms = int((perf_counter() - started) * 1000)
         self.run_logger.log_turn(
             thread_id=resolved_thread_id,
@@ -87,14 +97,20 @@ class CustomerAgent:
         """
         graph = StateGraph(AgentState)
         graph.add_node("intent_perception", self._build_intent_perception_subgraph())
-        graph.add_node("product_consultant", self._product_consultant)      # 产品咨询节点：RAG 检索+回答
-        graph.add_node("after_sales", self._after_sales)                    # 售后节点：转人工并生成交接摘要
-        graph.add_node("empathy_agent", self._empathy_agent)                # 情绪安抚节点：先安抚再决定转给谁
-        graph.add_node("clarify", self._clarify)                            # 澄清节点：每轮只追问一个关键缺口
-        graph.add_node("smalltalk", self._smalltalk)                        # 闲聊节点：简单问候
+        graph.add_node(
+            "product_consultant", self._product_consultant
+        )  # 产品咨询节点：RAG 检索+回答
+        graph.add_node(
+            "after_sales", self._after_sales
+        )  # 售后节点：转人工并生成交接摘要
+        graph.add_node(
+            "empathy_agent", self._empathy_agent
+        )  # 情绪安抚节点：先安抚再决定转给谁
+        graph.add_node("clarify", self._clarify)  # 澄清节点：每轮只追问一个关键缺口
+        graph.add_node("smalltalk", self._smalltalk)  # 闲聊节点：简单问候
 
         graph.add_edge(START, "intent_perception")
-        graph.add_conditional_edges(                                        # 感知 → 按意图路由到不同 agent
+        graph.add_conditional_edges(  # 感知 → 按意图路由到不同 agent
             "intent_perception",
             self._active_agent_router,
             {
@@ -105,11 +121,11 @@ class CustomerAgent:
                 "smalltalk": "smalltalk",
             },
         )
-        graph.add_edge("product_consultant", END)   # 产品咨询结束 → 结束
-        graph.add_edge("after_sales", END)          # 售后结束 → 结束
-        graph.add_edge("empathy_agent", END)        # 情绪安抚结束 → 结束
-        graph.add_edge("clarify", END)               # 澄清问题发出后等待用户下一轮
-        graph.add_edge("smalltalk", END)            # 闲聊结束 → 结束
+        graph.add_edge("product_consultant", END)  # 产品咨询结束 → 结束
+        graph.add_edge("after_sales", END)  # 售后结束 → 结束
+        graph.add_edge("empathy_agent", END)  # 情绪安抚结束 → 结束
+        graph.add_edge("clarify", END)  # 澄清问题发出后等待用户下一轮
+        graph.add_edge("smalltalk", END)  # 闲聊结束 → 结束
         return graph
 
     def _build_intent_perception_subgraph(self):
@@ -148,9 +164,13 @@ class CustomerAgent:
         if self.perception_fn is not None:
             result = self.perception_fn(message, history)
             draft = IntentDraft(
-                intent=result.intent, emotion=result.emotion, confidence=result.confidence,
-                handoff_requested=result.handoff_requested, secondary_intents=result.secondary_intents,
-                entities=result.entities, evidence=result.reason,
+                intent=result.intent,
+                emotion=result.emotion,
+                confidence=result.confidence,
+                handoff_requested=result.handoff_requested,
+                secondary_intents=result.secondary_intents,
+                entities=result.entities,
+                evidence=result.reason,
             )
             source = "injected"
         else:
@@ -173,9 +193,17 @@ class CustomerAgent:
         draft = state["intent_draft"]
         source = state.get("perception_trace", {}).get("classifier_source", "fallback")
         injected = state.get("injected_perception")
-        perception = injected if injected is not None else decide_perception(
-            draft, message=message, current_topic=state.get("current_topic"),
-            pending_clarification=pending, turn_relation=relation, classifier_source=source,
+        perception = (
+            injected
+            if injected is not None
+            else decide_perception(
+                draft,
+                message=message,
+                current_topic=state.get("current_topic"),
+                pending_clarification=pending,
+                turn_relation=relation,
+                classifier_source=source,
+            )
         )
         if pending and relation == "new_request":
             pending = None
@@ -194,7 +222,10 @@ class CustomerAgent:
         else:
             pending = None
         topic = state.get("current_topic")
-        if perception.actionability == "ready" and perception.intent in {"产品咨询", "使用问题"}:
+        if perception.actionability == "ready" and perception.intent in {
+            "产品咨询",
+            "使用问题",
+        }:
             topic = perception.entities.product or _resolve_topic_with_rag(
                 resolved_message, topic, self.rag_service
             )
@@ -202,7 +233,8 @@ class CustomerAgent:
         if perception.actionability == "needs_clarification":
             active_agent = (
                 "after_sales"
-                if pending and pending.turn_count >= self.settings.agent_max_clarification_turns
+                if pending
+                and pending.turn_count >= self.settings.agent_max_clarification_turns
                 else "clarify"
             )
         if perception.intent == "闲聊" or perception.actionability == "unsupported":
@@ -215,14 +247,23 @@ class CustomerAgent:
             "route": active_agent,
         }
         update: AgentState = {
-            "perception": perception, "current_topic": topic, "active_agent": active_agent,
-            "pending_clarification": pending, "resolved_user_message": resolved_message,
-            "dialogue_status": "ready", "perception_trace": trace,
+            "perception": perception,
+            "current_topic": topic,
+            "active_agent": active_agent,
+            "pending_clarification": pending,
+            "resolved_user_message": resolved_message,
+            "dialogue_status": "ready",
+            "perception_trace": trace,
         }
         if perception.actionability == "needs_clarification":
             update["dialogue_status"] = "awaiting_clarification"
-            if pending and pending.turn_count >= self.settings.agent_max_clarification_turns:
-                update["handoff_reason"] = "连续两轮澄清后仍缺少关键信息，需要人工继续确认。"
+            if (
+                pending
+                and pending.turn_count >= self.settings.agent_max_clarification_turns
+            ):
+                update["handoff_reason"] = (
+                    "连续两轮澄清后仍缺少关键信息，需要人工继续确认。"
+                )
         return update
 
     def _clarify(self, state: AgentState) -> AgentState:
@@ -237,15 +278,21 @@ class CustomerAgent:
         next_turn = pending.turn_count + 1
         visible_clarification = perception.clarification
         if next_turn == 1:
-            visible_clarification = visible_clarification.model_copy(update={"options": []})
-            perception = perception.model_copy(update={"clarification": visible_clarification})
+            visible_clarification = visible_clarification.model_copy(
+                update={"options": []}
+            )
+            perception = perception.model_copy(
+                update={"clarification": visible_clarification}
+            )
         pending = pending.model_copy(
             update={
                 "turn_count": next_turn,
                 "last_question": question,
-                "asked_slots": list(dict.fromkeys(
-                    pending.asked_slots + perception.clarification.missing_slots
-                )),
+                "asked_slots": list(
+                    dict.fromkeys(
+                        pending.asked_slots + perception.clarification.missing_slots
+                    )
+                ),
             }
         )
         return {
@@ -268,7 +315,9 @@ class CustomerAgent:
            - 并在结尾保留随时转人工的入口。
         """
         perception = state["perception"]
-        user_message = state.get("resolved_user_message") or _last_human_message(state["messages"])
+        user_message = state.get("resolved_user_message") or _last_human_message(
+            state["messages"]
+        )
 
         # 调用感知服务动态生成个性化共情话术
         empathy_speech = self.perception_service.generate_empathy(
@@ -280,7 +329,9 @@ class CustomerAgent:
 
         # A. 涉及售后/退换货/明确要人工 -> 动态共情 + 高优先级工单 -> 转人工
         if perception.handoff_requested or perception.intent == "售后诉求":
-            reason = "用户情绪愤怒且涉及售后诉求，已完成动态共情安抚并生成优先交接工单。"
+            reason = (
+                "用户情绪愤怒且涉及售后诉求，已完成动态共情安抚并生成优先交接工单。"
+            )
             summary = build_handoff_summary(state, reason=reason)
             answer = f"{empathy_speech}\n\n已为你转人工并开启优先绿色通道：\n{summary}"
             return {
@@ -301,7 +352,9 @@ class CustomerAgent:
             if self.rag_fn is not None:
                 result = self.rag_fn(user_message, state.get("current_topic"))
             else:
-                result = self.rag_service.answer(user_message, topic_hint=state.get("current_topic"))
+                result = self.rag_service.answer(
+                    user_message, topic_hint=state.get("current_topic")
+                )
 
             combined_answer = (
                 f"{empathy_speech}\n\n"
@@ -322,7 +375,9 @@ class CustomerAgent:
                 "handoff_summary": None,
             }
 
-        answer = f"{empathy_speech}\n\n您可以补充更多问题细节，或随时回复“转人工”联系专员。"
+        answer = (
+            f"{empathy_speech}\n\n您可以补充更多问题细节，或随时回复“转人工”联系专员。"
+        )
         return _non_rag_update(answer, dialogue_status="completed")
 
     def _product_consultant(self, state: AgentState) -> AgentState | Command:
@@ -334,11 +389,25 @@ class CustomerAgent:
         - 如果 RAG 连续两次返回 insufficient_evidence（证据不足），产品咨询 Agent 主动转售后（after_sales）
         - 成功回答 → 重置 failed_count 为 0
         """
-        user_message = state.get("resolved_user_message") or _last_human_message(state["messages"])
+        user_message = state.get("resolved_user_message") or _last_human_message(
+            state["messages"]
+        )
         if self.rag_fn is not None:
             result = self.rag_fn(user_message, state.get("current_topic"))
         else:
-            result = self.rag_service.answer(user_message, topic_hint=state.get("current_topic"))
+            subgraph_result = self.rag_subgraph.invoke(
+                {
+                    "question": user_message,
+                    "topic_hint": state.get("current_topic"),
+                    "rewritten_question": "",
+                    "candidates": [],
+                    "grades": [],
+                    "attempt": 0,
+                    "rag_result": None,
+                }
+            )
+            result = subgraph_result["rag_result"]
+        logger.info("product_consultant: answer_status=%s", result.answer_status)
         failed_count = state.get("failed_rag_count", 0)
         if result.answer_status == "insufficient_evidence":
             failed_count += 1
@@ -360,7 +429,9 @@ class CustomerAgent:
         if result.answer_status == "insufficient_evidence" and failed_count >= 2:
             # 同一 threadId 内连续两次 RAG 找不到依据 → 由产品咨询 Agent 主动转人工
             update["active_agent"] = "after_sales"
-            update["handoff_reason"] = "RAG 连续两次未找到足够依据，产品咨询 Agent 主动转交售后/人工。"
+            update["handoff_reason"] = (
+                "RAG 连续两次未找到足够依据，产品咨询 Agent 主动转交售后/人工。"
+            )
             return Command(goto="after_sales", update=update)
         return update
 
@@ -370,7 +441,9 @@ class CustomerAgent:
         if perception and perception.actionability == "unsupported":
             answer = "这个问题不在当前 CGM 客服能力范围内。我可以帮你查询产品信息、排查使用问题或处理售后诉求。"
         else:
-            answer = "你好，我可以帮你解答 CGM 动态血糖仪的产品、佩戴、读数和常见使用问题。"
+            answer = (
+                "你好，我可以帮你解答 CGM 动态血糖仪的产品、佩戴、读数和常见使用问题。"
+            )
         return _non_rag_update(answer, dialogue_status="completed")
 
     def _after_sales(self, state: AgentState) -> AgentState:
@@ -411,7 +484,10 @@ class CustomerAgent:
             return "after_sales"
         if perception.actionability == "needs_clarification":
             pending = state.get("pending_clarification")
-            if pending and pending.turn_count >= self.settings.agent_max_clarification_turns:
+            if (
+                pending
+                and pending.turn_count >= self.settings.agent_max_clarification_turns
+            ):
                 return "after_sales"
             return "clarify"
         if perception.intent == "闲聊" or perception.actionability == "unsupported":
@@ -431,7 +507,11 @@ def build_handoff_summary(state: AgentState, *, reason: str) -> str:
     - 未解决原因
     - 建议坐席下一步操作
     """
-    user_messages = [_message_to_text(message) for message in state.get("messages", []) if isinstance(message, HumanMessage)]
+    user_messages = [
+        _message_to_text(message)
+        for message in state.get("messages", [])
+        if isinstance(message, HumanMessage)
+    ]
     attempted = [
         _message_to_text(message)
         for message in state.get("messages", [])
@@ -483,6 +563,7 @@ def _default_handoff_reason(state: AgentState) -> str:
 
 # ── 工具函数 ──────────────────────────────────────────────
 
+
 def _last_human_message(messages: list[BaseMessage]) -> str:
     """从消息列表中提取最后一条用户消息"""
     for message in reversed(messages):
@@ -510,7 +591,10 @@ def _role_labeled_history(messages: list[BaseMessage]) -> list[str]:
 def _looks_like_new_request(message: str) -> bool:
     """Only clear pending clarification for an obviously independent request."""
     text = message.strip().lower()
-    return any(marker in text for marker in ("天气", "新闻", "股票", "写代码", "讲故事", "写一首诗"))
+    return any(
+        marker in text
+        for marker in ("天气", "新闻", "股票", "写代码", "讲故事", "写一首诗")
+    )
 
 
 def _non_rag_update(answer: str, *, dialogue_status: str) -> AgentState:
@@ -552,11 +636,21 @@ def _resolve_topic(message: str, existing: str | None) -> str | None:
     """只依据消息中的明确产品关键词解析话题，不触发检索。"""
     lowered = message.lower()
     topics = {
-        "gs1 pro": "GS1 Pro", "gs1": "GS1", "gs3": "GS3", "eco": "ECO",
-        "metatwin": "MetaTwin", "ks3": "KS3", "硅基手表": "硅基手表",
-        "手表": "硅基手表", "硅基动感健康app": "硅基动感健康APP",
-        "健康app": "硅基动感健康APP", "dexcom": "Dexcom G7", "g7": "Dexcom G7",
-        "libre": "FreeStyle Libre", "三诺": "三诺爱看 CGM", "硅基": "硅基动感 CGM",
+        "gs1 pro": "GS1 Pro",
+        "gs1": "GS1",
+        "gs3": "GS3",
+        "eco": "ECO",
+        "metatwin": "MetaTwin",
+        "ks3": "KS3",
+        "硅基手表": "硅基手表",
+        "手表": "硅基手表",
+        "硅基动感健康app": "硅基动感健康APP",
+        "健康app": "硅基动感健康APP",
+        "dexcom": "Dexcom G7",
+        "g7": "Dexcom G7",
+        "libre": "FreeStyle Libre",
+        "三诺": "三诺爱看 CGM",
+        "硅基": "硅基动感 CGM",
     }
     for keyword, topic in topics.items():
         if keyword in lowered or keyword in message:
@@ -627,7 +721,9 @@ def _resolve_topic_with_rag(
         biased_score = 0.0
         if biased_hits:
             b_hit = biased_hits[0]
-            biased_score = b_hit.final_score if b_hit.final_score is not None else b_hit.score
+            biased_score = (
+                b_hit.final_score if b_hit.final_score is not None else b_hit.score
+            )
 
         # 如果无偏匹配度大幅优于锁定话题的匹配度，或者锁定话题匹配度过低（低于阈值 0.35）
         if biased_score < 0.35 or score > biased_score + 0.15:
@@ -636,7 +732,9 @@ def _resolve_topic_with_rag(
     return existing
 
 
-def _select_active_agent(perception: PerceptionResult, existing: ActiveAgent | None) -> ActiveAgent:
+def _select_active_agent(
+    perception: PerceptionResult, existing: ActiveAgent | None
+) -> ActiveAgent:
     """
     根据感知结果选择应该激活哪个 agent。
 

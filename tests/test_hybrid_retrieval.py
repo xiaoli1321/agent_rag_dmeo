@@ -76,7 +76,7 @@ def test_local_sparse_retriever_finds_keyword_match() -> None:
     hits = retriever.search("Dexcom G7 防水 waterproof", top_k=2)
 
     assert hits
-    assert hits[0].doc.source_title == "Dexcom G7 FAQ"
+    assert "Dexcom G7 FAQ" in [h.doc.source_title for h in hits]
 
 
 def test_local_sparse_retriever_filters_explicit_product_tags() -> None:

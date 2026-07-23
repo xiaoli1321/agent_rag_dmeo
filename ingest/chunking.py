@@ -61,7 +61,9 @@ def _build_parent_child_chunks(
     chunks: list[ChunkPayload] = []
     for block in blocks:
         for parent in _split_text(
-            block.text, max_chars=options.parent_max_chars, overlap=options.overlap_chars
+            block.text,
+            max_chars=options.parent_max_chars,
+            overlap=options.overlap_chars,
         ):
             for child in _split_text(
                 parent, max_chars=options.child_max_chars, overlap=options.overlap_chars

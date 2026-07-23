@@ -33,7 +33,9 @@ def evaluate_cases(
 
     for case in cases:
         pending_data = case.get("pending_clarification")
-        pending = PendingClarification.model_validate(pending_data) if pending_data else None
+        pending = (
+            PendingClarification.model_validate(pending_data) if pending_data else None
+        )
         result = classify(
             case["input"],
             current_topic=case.get("current_topic"),
@@ -45,14 +47,22 @@ def evaluate_cases(
         actionability_ok = result.actionability == case["expected_actionability"]
         intent_correct += int(intent_ok)
         for label in labels:
-            per_label[label]["tp"] += int(result.intent == label and case["expected_intent"] == label)
-            per_label[label]["fp"] += int(result.intent == label and case["expected_intent"] != label)
-            per_label[label]["fn"] += int(result.intent != label and case["expected_intent"] == label)
+            per_label[label]["tp"] += int(
+                result.intent == label and case["expected_intent"] == label
+            )
+            per_label[label]["fp"] += int(
+                result.intent == label and case["expected_intent"] != label
+            )
+            per_label[label]["fn"] += int(
+                result.intent != label and case["expected_intent"] == label
+            )
         expected_route = case.get("expected_route") or _expected_route(case)
         route_correct += int(_route_for_result(result) == expected_route)
         if case.get("expected_handoff"):
             handoff_expected += 1
-            handoff_correct += int(result.handoff_requested or result.intent == "售后诉求")
+            handoff_correct += int(
+                result.handoff_requested or result.intent == "售后诉求"
+            )
         if expected_clarification and predicted_clarification:
             clarification_tp += 1
         if not expected_clarification:
@@ -72,20 +82,36 @@ def evaluate_cases(
     predicted_clarifications = clarification_tp + clarification_fp
     f1_scores = []
     for counts in per_label.values():
-        precision = counts["tp"] / (counts["tp"] + counts["fp"]) if counts["tp"] + counts["fp"] else 0.0
-        recall = counts["tp"] / (counts["tp"] + counts["fn"]) if counts["tp"] + counts["fn"] else 0.0
-        f1_scores.append(2 * precision * recall / (precision + recall) if precision + recall else 0.0)
+        precision = (
+            counts["tp"] / (counts["tp"] + counts["fp"])
+            if counts["tp"] + counts["fp"]
+            else 0.0
+        )
+        recall = (
+            counts["tp"] / (counts["tp"] + counts["fn"])
+            if counts["tp"] + counts["fn"]
+            else 0.0
+        )
+        f1_scores.append(
+            2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        )
     return {
         "total": total,
         "intent_accuracy": intent_correct / total if total else 0.0,
         "intent_macro_f1": sum(f1_scores) / len(f1_scores) if f1_scores else 0.0,
         "route_accuracy": route_correct / total if total else 0.0,
-        "handoff_recall": handoff_correct / handoff_expected if handoff_expected else 1.0,
+        "handoff_recall": handoff_correct / handoff_expected
+        if handoff_expected
+        else 1.0,
         "clarification_precision": (
-            clarification_tp / predicted_clarifications if predicted_clarifications else 1.0
+            clarification_tp / predicted_clarifications
+            if predicted_clarifications
+            else 1.0
         ),
         "unnecessary_clarification_rate": (
-            clarification_fp / non_clarification_cases if non_clarification_cases else 0.0
+            clarification_fp / non_clarification_cases
+            if non_clarification_cases
+            else 0.0
         ),
         "passed": sum(row["intent_ok"] and row["actionability_ok"] for row in rows),
         "rows": rows,

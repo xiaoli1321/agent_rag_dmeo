@@ -48,7 +48,9 @@ class AgentRunLogger:
                 "current_topic": state.get("current_topic"),
                 "answer_status": state.get("answer_status"),
                 "dialogue_status": state.get("dialogue_status"),
-                "pending_clarification": _dump_model(state.get("pending_clarification")),
+                "pending_clarification": _dump_model(
+                    state.get("pending_clarification")
+                ),
                 "clarification_turn_count": (
                     state["pending_clarification"].turn_count
                     if state.get("pending_clarification")

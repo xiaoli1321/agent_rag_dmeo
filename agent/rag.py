@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 import re
 from time import perf_counter
 from typing import Callable, TypeVar
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 from .embeddings import get_embeddings
 from .models import (
@@ -274,7 +278,7 @@ class RagService:
         return self._search_dense(question, topic_hint=topic_hint)
 
     def _search_dense(
-        self, question: str, *, topic_hint: str | None = None
+        self, question: str, *, topic_hint: str | None = None, top_k: int | None = None
     ) -> list[RetrievedDoc]:
         """
         利用向量数据库（Qdrant）进行稠密向量相似度检索。
@@ -282,10 +286,12 @@ class RagService:
         参数:
             question: 检索问题。
             topic_hint: 可选的主题提示。
+            top_k: 返回结果数，默认 agent_top_k。
 
         返回:
             list[RetrievedDoc]: 命中相似性评分的文档列表。
         """
+        k = top_k or self.settings.agent_top_k
         if not self.settings.embedding_configured:
             return []
         try:
@@ -304,11 +310,9 @@ class RagService:
         )
         # 将主题提示词与提问拼接作为最终的检索输入，提升检索的领域相关性
         query = f"{topic_hint}\n{question}" if topic_hint else question
-        product_tags = _explicit_product_tags(question)
         results = vector_store.similarity_search_with_score(
             query,
-            k=self.settings.agent_top_k,
-            filter=_qdrant_product_filter(product_tags),
+            k=k,
         )
         docs: list[RetrievedDoc] = []
         for document, score in results:
@@ -333,7 +337,7 @@ class RagService:
         return docs
 
     def _search_hybrid(
-        self, question: str, *, topic_hint: str | None = None
+        self, question: str, *, topic_hint: str | None = None, top_k: int | None = None
     ) -> list[RetrievedDoc]:
         """
         混合检索。合并稠密向量检索与基于 BM25 的本地稀疏文本检索（Sparse），提高长尾及专业词汇的召回率。
@@ -341,28 +345,30 @@ class RagService:
         参数:
             question: 检索问题。
             topic_hint: 可选主题提示。
+            top_k: 返回结果数，默认 agent_top_k。
 
         返回:
             list[RetrievedDoc]: 经混合打分与重排后的前 N 个文档。
         """
         from .hybrid import HybridRetriever, LocalSparseRetriever, dense_docs_to_hits
 
+        k = top_k or self.settings.agent_top_k
         query = f"{topic_hint}\n{question}" if topic_hint else question
         try:
-            dense_docs = self._search_dense(question, topic_hint=topic_hint)
+            dense_docs = self._search_dense(question, topic_hint=topic_hint, top_k=k)
         except Exception:
             dense_docs = []
         # 获取稀疏检索结果（本地倒排索引）
         sparse_hits = LocalSparseRetriever().search(
             query,
-            top_k=self.settings.agent_top_k * 3,
+            top_k=k * 3,
             product_tags=_explicit_product_tags(question),
         )
         # 使用归一化加权融合对 Dense 和 Sparse 的结果重排。
         fused = HybridRetriever(alpha=self.settings.agent_fusion_alpha).fuse(
             dense_docs_to_hits(dense_docs), sparse_hits
         )
-        return [hit.doc for hit in fused[: self.settings.agent_top_k]]
+        return [hit.doc for hit in fused[:k]]
 
     def grade_documents(
         self, question: str, docs: list[RetrievedDoc], *, attempt: int = 0
@@ -410,8 +416,8 @@ class RagService:
                     grader="llm",
                     attempt=attempt,
                 )
-            except Exception as exc:
-                raise RuntimeError("LLM document grading failed") from exc
+            except Exception:
+                pass
 
         # 2. 启发式双重保险：计算关键词覆盖度和重合度
         overlap, coverage = _keyword_overlap_coverage(question, doc.chunk_text)
@@ -446,6 +452,7 @@ class RagService:
             REFERENCE_LINE_PATTERN.match(line) for line in answer.splitlines()
         )
         if "引用：" not in answer or not has_reference_line:
+            logger.warning("hallucination=failed reason=missing_references")
             return HallucinationDecision(
                 status="failed",
                 reason="answer_missing_required_references",
@@ -460,6 +467,11 @@ class RagService:
             try:
                 grade = self._llm_grounding_grade(answer_body, evidence_text)
                 if not grade.grounded:
+                    logger.warning(
+                        "hallucination=failed grader=llm reason=%s claims=%s",
+                        grade.reason,
+                        grade.unsupported_claims,
+                    )
                     return HallucinationDecision(
                         status="failed",
                         reason=grade.reason,
@@ -470,8 +482,8 @@ class RagService:
                 return HallucinationDecision(
                     status="grounded", reason=grade.reason, grader="llm"
                 )
-            except Exception as exc:
-                raise RuntimeError("LLM grounding check failed") from exc
+            except Exception:
+                pass
 
         # 3. 启发式数值硬过滤：数字在事实陈述中极其关键，若回答中含有检索文本中从未出现过的数字，则判定为幻觉风险
         unsupported_numbers = [
@@ -480,6 +492,9 @@ class RagService:
             if number.strip() and not _is_number_supported(number, evidence_text)
         ]
         if unsupported_numbers:
+            logger.warning(
+                "hallucination=failed grader=heuristic numbers=%s", unsupported_numbers
+            )
             return HallucinationDecision(
                 status="failed",
                 reason="answer_contains_numbers_not_supported_by_evidence",
@@ -526,8 +541,11 @@ class RagService:
                     rejected_context=rejected_context,
                 )
             )
-        except Exception as exc:
-            raise RuntimeError("LLM query rewrite failed") from exc
+        except Exception:
+            return QueryRewrite(
+                rewritten_question=stripped,
+                reason="rewrite_fallback_due_to_llm_error",
+            )
 
     def _decide_evidence(
         self,
@@ -549,6 +567,7 @@ class RagService:
             EvidenceDecision: 最终判断是否可信并具备足够证据。
         """
         if not candidate_docs:
+            logger.info("evidence=insufficient reason=candidates_empty")
             return EvidenceDecision(
                 status="insufficient_evidence",
                 reason="knowledge_missing",
@@ -559,6 +578,9 @@ class RagService:
             reason = "retrieval_mismatch"
             if all(grade.failure_type == "retrieval_mismatch" for grade in grades):
                 reason = "retrieval_mismatch"
+            logger.info(
+                "evidence=insufficient reason=%s top_score=%.3f", reason, top_score
+            )
             return EvidenceDecision(
                 status="insufficient_evidence", reason=reason, top_score=top_score
             )
@@ -677,16 +699,19 @@ class RagService:
             max_tokens=min(self.settings.llm_max_tokens, 800),
             extra_body=self.settings.llm_extra_body,
         )
-        message = chat.invoke(
-            [
-                SystemMessage(
-                    content=load_prompt("rag_answer.md").format(
-                        context=context, question=question
-                    )
-                ),
-                HumanMessage(content=question),
-            ]
-        )
+        try:
+            message = chat.invoke(
+                [
+                    SystemMessage(
+                        content=load_prompt("rag_answer.md").format(
+                            context=context, question=question
+                        )
+                    ),
+                    HumanMessage(content=question),
+                ]
+            )
+        except Exception:
+            return _fallback_grounded_answer(docs)
         content = message.content
         if isinstance(content, list):
             return "\n".join(
@@ -717,7 +742,9 @@ class RagService:
         prompt = load_prompt("rag_document_grader.md").format(
             question=question, document=doc.chunk_text
         )
-        return chat.with_structured_output(RelevanceGrade, method="json_mode").invoke(prompt)
+        return chat.with_structured_output(RelevanceGrade, method="json_mode").invoke(
+            prompt
+        )
 
     def _llm_grounding_grade(self, answer: str, evidence: str) -> GroundingGrade:
         """
@@ -727,7 +754,9 @@ class RagService:
         prompt = load_prompt("rag_grounding_grader.md").format(
             answer=answer, evidence=evidence
         )
-        return chat.with_structured_output(GroundingGrade, method="json_mode").invoke(prompt)
+        return chat.with_structured_output(GroundingGrade, method="json_mode").invoke(
+            prompt
+        )
 
 
 def format_references(docs: list[RetrievedDoc]) -> str:
@@ -1016,3 +1045,177 @@ def _is_number_supported(number_str: str, evidence_text: str) -> bool:
             return True
 
     return False
+
+
+# ── RAG Subgraph ──────────────────────────────────────────
+
+from langgraph.graph import END, START, StateGraph
+from typing_extensions import TypedDict
+
+
+class RagSubgraphState(TypedDict):
+    question: str
+    topic_hint: str | None
+    rewritten_question: str
+    candidates: list[RetrievedDoc]
+    grades: list[DocumentGrade]
+    attempt: int
+    rag_result: RagResult | None
+
+
+def build_rag_subgraph(settings: DemoSettings, rag_service: RagService):
+    """
+    Build a compiled LangGraph subgraph for the full RAG pipeline.
+
+    Flow: rewrite_retrieve → grade_docs → [corrective_rewrite loop] → assemble_result
+    """
+
+    def rewrite_retrieve(state: RagSubgraphState) -> dict:
+        q = state["question"]
+        th = state.get("topic_hint")
+        rq = state.get("rewritten_question", "")
+        if not rq:
+            rq = rag_service._rewrite_question(q, topic_hint=th).rewritten_question
+        candidates = rag_service._search_hybrid(
+            rq, topic_hint=th, top_k=settings.agent_top_k * 2
+        )
+        return {"rewritten_question": rq, "candidates": candidates}
+
+    def grade_docs(state: RagSubgraphState) -> dict:
+        grades = rag_service.grade_documents(
+            state["rewritten_question"],
+            state["candidates"],
+            attempt=state.get("attempt", 0),
+        )
+        return {"grades": grades}
+
+    def _rag_route(state: RagSubgraphState) -> str:
+        grades = state.get("grades", [])
+        attempt = state.get("attempt", 0)
+        if not grades or not state.get("candidates"):
+            return "assemble_result"
+        all_rejected = all(g.binary_score == "no" for g in grades)
+        if all_rejected and attempt < settings.agent_corrective_retries:
+            return "corrective_rewrite"
+        return "assemble_result"
+
+    def corrective_rewrite(state: RagSubgraphState) -> dict:
+        rq = rag_service._rewrite_question(
+            state["question"],
+            topic_hint=state.get("topic_hint"),
+            rejected_docs=state.get("candidates", []),
+        ).rewritten_question
+        return {
+            "rewritten_question": rq,
+            "attempt": state.get("attempt", 0) + 1,
+            "candidates": [],
+            "grades": [],
+        }
+
+    def assemble_result(state: RagSubgraphState) -> dict:
+        candidates = state.get("candidates", [])
+        grades = state.get("grades", [])
+        docs = [doc for doc, g in zip(candidates, grades) if g.binary_score == "yes"]
+
+        evidence = rag_service._decide_evidence(
+            state["rewritten_question"], candidates, docs, grades
+        )
+
+        def _trace(docs_used: list[RetrievedDoc]) -> dict:
+            return rag_service._build_debug_trace(
+                state["question"],
+                docs_used,
+                evidence,
+                candidate_docs=candidates,
+                grades=grades,
+                rewritten_question=state["rewritten_question"],
+            )
+
+        if evidence.status == "insufficient_evidence":
+            logger.info(
+                "rag_subgraph: evidence=insufficient reason=%s docs=%d accepted=%d",
+                evidence.reason,
+                len(candidates),
+                len(docs),
+            )
+            return {
+                "rag_result": RagResult(
+                    answer=INSUFFICIENT_EVIDENCE_ANSWER,
+                    retrieved_docs=[],
+                    answer_status="insufficient_evidence",
+                    evidence_decision=evidence,
+                    debug_trace=_trace([]),
+                )
+            }
+
+        logger.info(
+            "rag_subgraph: evidence=grounded docs=%d accepted=%d",
+            len(candidates),
+            len(docs),
+        )
+        answer = rag_service._generate_answer(state["rewritten_question"], docs)
+        answer = _strip_generated_references(answer, docs)
+
+        # 检测 LLM 虽获得依据却拒绝回答的情况
+        if _looks_like_insufficient_answer(answer):
+            generation_warning = "llm_refused_after_grounded_retrieval"
+        else:
+            generation_warning = None
+
+        # 先追加引用再幻觉检查（check_hallucination 需要看"引用："行）
+        answer = f"{answer.rstrip()}\n\n{format_references(docs)}"
+
+        hd = rag_service.check_hallucination(answer, docs)
+
+        if hd.status == "failed":
+            logger.warning(
+                "rag_subgraph: hallucination=failed reason=%s grader=%s",
+                hd.reason,
+                hd.grader,
+            )
+            trace = _trace([])
+            trace["hallucination_decision"] = hd.model_dump()
+            return {
+                "rag_result": RagResult(
+                    answer=INSUFFICIENT_EVIDENCE_ANSWER,
+                    retrieved_docs=[],
+                    answer_status="insufficient_evidence",
+                    evidence_decision=evidence,
+                    debug_trace=trace,
+                )
+            }
+
+        logger.info("rag_subgraph: hallucination=grounded answer_len=%d", len(answer))
+        trace = _trace(docs)
+        if generation_warning:
+            trace["generation_warning"] = generation_warning
+        return {
+            "rag_result": RagResult(
+                answer=answer,
+                retrieved_docs=docs,
+                answer_status="grounded",
+                evidence_decision=evidence,
+                debug_trace=trace,
+            )
+        }
+
+    builder = StateGraph(RagSubgraphState)
+    builder.add_node("rewrite_retrieve", rewrite_retrieve)
+    builder.add_node("grade_docs", grade_docs)
+    builder.add_node("corrective_rewrite", corrective_rewrite)
+    builder.add_node("assemble_result", assemble_result)
+
+    builder.add_edge(START, "rewrite_retrieve")
+    builder.add_edge("rewrite_retrieve", "grade_docs")
+    builder.add_conditional_edges(
+        "grade_docs",
+        _rag_route,
+        {
+            "corrective_rewrite": "corrective_rewrite",
+            "assemble_result": "assemble_result",
+        },
+    )
+    builder.add_edge("corrective_rewrite", "rewrite_retrieve")
+    builder.add_edge("assemble_result", END)
+
+    return builder.compile()
