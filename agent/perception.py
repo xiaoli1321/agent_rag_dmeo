@@ -218,7 +218,9 @@ def decide_perception(
         )
         entities.issue = None
     definition = load_intent_catalog()[draft.intent]
-    if entities.issue in {"坏了", "不行", "有问题", "用不了", "不能用"}:
+    problem_slot = load_slot_catalog().get("problem_detail")
+    vague_set = set(problem_slot.vague_values if problem_slot else [])
+    if entities.issue and entities.issue in vague_set:
         entities.issue = None
     if not entities.product and current_topic:
         entities.product = current_topic
@@ -296,6 +298,7 @@ def _decision_from_draft(
         secondary_intents=draft.secondary_intents,
         turn_relation=turn_relation,
         actionability=actionability,
+        is_general_query=draft.is_general_query,
         entities=entities,
         reason=draft.evidence or policy_reason,
         intent_evidence=draft.evidence,
@@ -355,10 +358,9 @@ def _is_medical_out_of_scope(message: str) -> bool:
 
 
 def _is_vague_device_issue(message: str) -> bool:
-    return any(
-        marker in message.strip().lower()
-        for marker in ("坏了", "不行", "有问题", "用不了", "不能用")
-    )
+    problem_slot = load_slot_catalog().get("problem_detail")
+    vague_values = problem_slot.vague_values if problem_slot else ("坏了", "不行", "有问题", "用不了", "不能用")
+    return any(marker in message.strip().lower() for marker in vague_values)
 
 
 def _has_explicit_handoff_request(message: str) -> bool:

@@ -222,7 +222,9 @@ class CustomerAgent:
         else:
             pending = None
         topic = state.get("current_topic")
-        if perception.actionability == "ready" and perception.intent in {
+        if perception.is_general_query:
+            topic = None
+        elif perception.actionability == "ready" and perception.intent in {
             "产品咨询",
             "使用问题",
         }:

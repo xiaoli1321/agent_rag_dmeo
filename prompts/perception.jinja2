@@ -18,6 +18,7 @@ JSON 字段和值必须严格使用以下中文枚举和字段名，不能翻译
 {% else %}
 - 当前未锁定任何特定产品型号。
 {% endif %}
+- 当用户询问“公司有哪些产品”、“产品列表”、“介绍一下产品线”、“你们卖什么”等整体概览提问时，必须设 is_general_query=true 且 entities.product=null，严禁乱猜测或绑定单一特定型号。
 - entities.product 只能输出标准的 ProductEnum 枚举之一（如 GS3, GS1, ECO, KS3, MetaTwin, 硅基手表, 硅基健康APP, Dexcom G7, FreeStyle Libre, 三诺爱看, CGM）或 null，绝不能自行造词或拼凑产品名称（如禁止输出“硅基手表的ECO”）。
 - 当前已确认产品和带角色的最近上下文仅用于理解指代；不能把助手曾说过的内容当成用户诉求。
 - 一句包含多个诉求时，售后诉求为主意图，其他业务诉求写入 secondary_intents。

@@ -448,18 +448,47 @@
       document.querySelector("#state-agent").textContent = payload.active_agent || "-";
       document.querySelector("#state-status").textContent = payload.dialogue_status || payload.answer_status || "-";
 
-      // 槽位实体 (Entities) 展现
+      // 槽位实体 (Entities) 具体高亮渲染
       const entities = perception.entities || {};
-      const entityParts = [];
-      if (entities.product) entityParts.push(`产品: ${entities.product}`);
-      if (entities.issue) entityParts.push(`故障/现象: ${entities.issue}`);
-      if (entities.requested_action) entityParts.push(`动作: ${entities.requested_action}`);
-      document.querySelector("#state-entities").textContent = entityParts.length ? entityParts.join(" | ") : "未提取到明确实体";
+      const entitiesContainer = document.querySelector("#state-entities");
+      entitiesContainer.innerHTML = "";
+      const entityItems = [
+        { key: "product", label: "产品型号", value: entities.product, color: "badge-accent" },
+        { key: "issue", label: "故障/现象", value: entities.issue, color: "badge-danger" },
+        { key: "requested_action", label: "业务动作", value: entities.requested_action, color: "badge-info" }
+      ].filter(item => item.value);
 
-      // 缺失槽位 (Missing Slots) 展现
+      if (entityItems.length) {
+        entityItems.forEach(item => {
+          const pill = document.createElement("span");
+          pill.className = `badge ${item.color}`;
+          pill.style.marginRight = "6px";
+          pill.style.marginBottom = "4px";
+          pill.style.display = "inline-block";
+          pill.innerHTML = `<strong>${item.label}:</strong> ${item.value}`;
+          entitiesContainer.appendChild(pill);
+        });
+      } else {
+        entitiesContainer.textContent = "未提取到明确实体";
+      }
+
+      // 缺失槽位 (Missing Slots) 具体高亮渲染
       const clarification = perception.clarification || {};
+      const missingContainer = document.querySelector("#state-missing-slots");
+      missingContainer.innerHTML = "";
       const missingSlots = clarification.missing_slots || [];
-      document.querySelector("#state-missing-slots").textContent = missingSlots.length ? missingSlots.join("、") : "无 (槽位已健全)";
+      if (missingSlots.length) {
+        missingSlots.forEach(slot => {
+          const pill = document.createElement("span");
+          pill.className = "badge badge-danger";
+          pill.style.marginRight = "6px";
+          pill.style.display = "inline-block";
+          pill.innerHTML = `⚠️ 缺失: ${slot}`;
+          missingContainer.appendChild(pill);
+        });
+      } else {
+        missingContainer.innerHTML = '<span class="badge badge-accent">✓ 槽位健全 (无缺失)</span>';
+      }
 
       document.querySelector("#state-secondary-intents").textContent = (perception.secondary_intents || []).join("、") || "-";
       document.querySelector("#state-clarification").textContent = clarification.needed

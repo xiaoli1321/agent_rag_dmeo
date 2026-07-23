@@ -81,6 +81,10 @@ class IntentDraft(BaseModel):
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     handoff_requested: bool = False
     is_greeting: bool = False
+    is_general_query: bool = Field(
+        default=False,
+        description="标记当前请求是否为泛指/整体概览咨询（如问'公司产品有哪些'、'你们卖什么'）。当为 True 时禁止自动锁定单一具体型号。",
+    )
     secondary_intents: list[Intent] = Field(default_factory=list)
     entities: PerceptionEntities = Field(default_factory=PerceptionEntities)
     evidence: str = Field(default="", max_length=240)
@@ -196,6 +200,9 @@ class PerceptionResult(BaseModel):
     )
     actionability: Actionability = Field(
         default="ready", description="当前信息能否安全进入下游执行。"
+    )
+    is_general_query: bool = Field(
+        default=False, description="标记是否为泛指/整体概览咨询。"
     )
     entities: PerceptionEntities = Field(default_factory=PerceptionEntities)
     clarification: ClarificationDecision = Field(default_factory=ClarificationDecision)
