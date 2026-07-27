@@ -1,20 +1,20 @@
 slots:
   target_product:
     entity_field: product
-    question: "请问你咨询的是哪个 CGM 产品或设备型号？"
-    options: ["GS3", "Dexcom G7", "硅基动感 CGM", "不清楚"]
+    question: "请问你咨询的是哪款产品或设备型号？（我们主要有 GS1、ECO、GS3）"
+    options: ["GS1", "ECO", "GS3"]
     reason: missing_target
   reference_target:
     entity_field: product
-    question: "你说的“这个”具体是哪个产品或型号？"
-    options: ["GS3", "Dexcom G7", "硅基手表", "不清楚"]
+    question: "你说的“这个”具体是哪款产品或型号？（我们主要有 GS1、ECO、GS3）"
+    options: ["GS1", "ECO", "GS3"]
     reason: ambiguous_reference
   problem_detail:
     entity_field: issue
     question: "{product}具体出现了什么问题或表现？"
     options: ["无法连接", "读数异常", "传感器脱落", "其他问题"]
     reason: missing_detail
-    vague_values: ["坏了", "不行", "有问题", "用不了", "不能用"]
+    vague_values: ["坏了", "不行", "有问题", "用不了", "不能用", "难用", "不好用", "太难用", "难用死了"]
   user_goal:
     entity_field: requested_action
     question: "你希望查询产品信息、排查使用问题，还是办理售后？"

@@ -35,6 +35,7 @@ class PerceptionService:
         history: Iterable[str] | None = None,
         *,
         current_topic: str | None = None,
+        current_issue: str | None = None,
         pending_clarification: PendingClarification | None = None,
     ) -> PerceptionResult:
         """Compatibility facade used by evaluation scripts.
@@ -50,6 +51,7 @@ class PerceptionService:
             draft,
             message=message,
             current_topic=current_topic,
+            current_issue=current_issue,
             pending_clarification=pending_clarification,
             turn_relation="new_request",
             classifier_source=source,
@@ -74,7 +76,7 @@ class PerceptionService:
             base_url=self.settings.llm_api_base,
             model=self.settings.llm_model,
             temperature=self.temperature,
-            max_tokens=min(self.settings.llm_max_tokens, 1000),
+            max_tokens=min(self.settings.llm_max_tokens, 2048),
             extra_body=self.settings.llm_extra_body,
         )
         try:
@@ -93,7 +95,8 @@ class PerceptionService:
                 [
                     SystemMessage(content=system_prompt),
                     HumanMessage(content=human_prompt),
-                ]
+                ],
+                config={"run_name": "IntentPerceptionLLM"},
             )
             return (
                 result
@@ -120,8 +123,8 @@ class PerceptionService:
             api_key=self.settings.llm_api_key,
             base_url=self.settings.llm_api_base,
             model=self.settings.llm_model,
-            temperature=0.3,
-            max_tokens=250,
+            temperature=0.7,
+            max_tokens=2048,
             extra_body=self.settings.llm_extra_body,
         )
         try:
@@ -145,8 +148,10 @@ class PerceptionService:
                 ]
             )
             return str(res.content).strip()
-        except Exception as exc:
-            raise RuntimeError("LLM empathy generation failed") from exc
+        except Exception:
+            return heuristic_empathy(
+                message, intent=intent, handoff_requested=handoff_requested, issue=issue
+            )
 
 
 def heuristic_empathy(
@@ -190,6 +195,7 @@ def decide_perception(
     *,
     message: str,
     current_topic: str | None,
+    current_issue: str | None = None,
     pending_clarification: PendingClarification | None,
     turn_relation: str,
     classifier_source: str,
@@ -224,6 +230,11 @@ def decide_perception(
         entities.issue = None
     if not entities.product and current_topic:
         entities.product = current_topic
+    if current_issue and not entities.issue:
+        if _is_troubleshooting_feedback(message) or draft.emotion in {"愤怒", "不满"}:
+            entities.issue = current_issue
+            if draft.intent not in {"售后诉求", "使用问题"}:
+                draft = draft.model_copy(update={"intent": "使用问题"})
 
     if draft.handoff_requested or definition.direct_handoff:
         return _decision_from_draft(
@@ -240,11 +251,17 @@ def decide_perception(
         "correction",
     }:
         merged = pending_clarification.collected_entities.model_copy(deep=True)
-        for field_name in PerceptionEntities.model_fields:
-            value = getattr(entities, field_name, None)
-            if value:
-                setattr(merged, field_name, value)
+        if entities.product:
+            merged.product = entities.product
+        if entities.requested_action:
+            merged.requested_action = entities.requested_action
+        if entities.issue and (not merged.issue or turn_relation == "correction"):
+            merged.issue = entities.issue
         missing = pending_clarification.missing_slots[0]
+        if missing == "problem_detail" and not merged.issue:
+            clean_msg = message.strip()
+            if not any(w in clean_msg for w in ("不知道", "不清楚", "都不是", "不确定")):
+                merged.issue = clean_msg
         resolved = _is_slot_resolved(missing, merged)
         if resolved:
             resolved_draft = draft.model_copy(
@@ -363,6 +380,25 @@ def _is_vague_device_issue(message: str) -> bool:
     return any(marker in message.strip().lower() for marker in vague_values)
 
 
+def _is_troubleshooting_feedback(message: str) -> bool:
+    feedback_markers = (
+        "还是不行",
+        "按照你的操作",
+        "按你的操作",
+        "按你的方法",
+        "跟着做了",
+        "试了不行",
+        "试过了不行",
+        "没有用",
+        "没效果",
+        "没解决",
+        "烂产品",
+        "烂东西",
+        "服了",
+    )
+    return any(marker in message for marker in feedback_markers)
+
+
 def _has_explicit_handoff_request(message: str) -> bool:
     return any(
         marker in message
@@ -408,6 +444,11 @@ def heuristic_perception(
         "怎么用",
         "使用",
         "连不上",
+        "连接不上",
+        "断连",
+        "无法连接",
+        "搜不到",
+        "扫不上",
         "连接",
         "佩戴",
         "脱落",
@@ -424,9 +465,6 @@ def heuristic_perception(
         "洗澡",
         "cgm",
         "传感器",
-        "dexcom",
-        "libre",
-        "三诺",
         "硅基",
         "血糖",
         "gs1",
@@ -434,6 +472,8 @@ def heuristic_perception(
         "eco",
         "metatwin",
         "ks3",
+        "手表",
+        "健康app",
     )
     greeting_words = ("你好", "您好", "嗨", "hello", "你是谁", "谢谢", "再见")
     vague_issue_words = {"坏了", "不行", "有问题", "用不了", "不能用"}
@@ -450,7 +490,7 @@ def heuristic_perception(
     has_usage = any(word in text for word in usage_words)
     has_product = any(word in text for word in product_words)
     product = _extract_product(stripped) or current_topic
-    issue = _extract_issue(stripped, usage_words, product_words)
+    issue = _extract_issue(stripped, usage_words)
     requested_action = _extract_requested_action(stripped)
 
     if handoff or has_aftersales:
@@ -505,7 +545,7 @@ def heuristic_perception(
 
     pronouns = ("这个", "那个", "它", "该设备", "这款")
     has_ambiguous_reference = (
-        any(word in stripped for word in pronouns) and not current_topic
+        any(word in stripped for word in pronouns) and not product and not current_topic
     )
     if has_ambiguous_reference and (has_usage or has_product or "怎么" in stripped):
         return _needs_clarification(
@@ -514,6 +554,21 @@ def heuristic_perception(
             confidence=0.61,
             slot="reference_target",
             entities=PerceptionEntities(issue=issue, requested_action=requested_action),
+        )
+
+    is_general_query = intent == "产品咨询" and not product and any(
+        kw in stripped for kw in ("是什么", "公司有哪些", "有哪些产品", "公司卖什么", "区别")
+    )
+    if is_general_query:
+        return PerceptionResult(
+            intent="产品咨询",
+            emotion=emotion,
+            confidence=0.9,
+            handoff_requested=False,
+            actionability="ready",
+            is_general_query=True,
+            entities=PerceptionEntities(issue=issue, requested_action=requested_action),
+            reason="全局泛指查询，无需锁定单一型号。",
         )
 
     if intent in {"产品咨询", "使用问题"} and not product:
@@ -604,7 +659,7 @@ def _classify_clarification_reply(
 
     missing_slot = pending_clarification.missing_slots[0]
     resolved = _is_slot_resolved(missing_slot, entities)
-    if resolved and missing_slot in {"target_product", "reference_target"} and product == current_topic and unclear:
+    if missing_slot in {"target_product", "reference_target"} and unclear:
         resolved = False
 
     if resolved and not unclear:
@@ -675,15 +730,21 @@ def _extract_product(message: str) -> str | None:
         ("eco", "ECO"),
         ("metatwin", "MetaTwin"),
         ("ks3", "KS3"),
-        ("dexcom", "Dexcom G7"),
-        ("g7", "Dexcom G7"),
-        ("libre", "FreeStyle Libre"),
         ("硅基手表", "硅基手表"),
+        ("手表", "硅基手表"),
+        ("硅基健康app", "硅基健康APP"),
         ("健康app", "硅基健康APP"),
+        ("dexcom g7", "Dexcom G7"),
+        ("g7", "Dexcom G7"),
+        ("dexcom", "Dexcom G7"),
+        ("freestyle libre", "FreeStyle Libre"),
+        ("freestyle", "FreeStyle Libre"),
+        ("libre", "FreeStyle Libre"),
+        ("三诺爱看", "三诺爱看"),
         ("三诺", "三诺爱看"),
-        ("硅基", "CGM"),
-        ("cgm", "CGM"),
+        ("硅基传感器", "CGM"),
         ("传感器", "CGM"),
+        ("硅基", "CGM"),
     )
     for keyword, product in products:
         if keyword in lowered:
@@ -692,9 +753,9 @@ def _extract_product(message: str) -> str | None:
 
 
 def _extract_issue(
-    message: str, usage_words: tuple[str, ...], product_words: tuple[str, ...]
+    message: str, usage_words: tuple[str, ...]
 ) -> str | None:
-    for word in usage_words + product_words:
+    for word in usage_words:
         if word in message.lower():
             return word
     return None

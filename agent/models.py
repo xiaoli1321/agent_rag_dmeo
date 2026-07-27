@@ -129,14 +129,8 @@ class IntentDraft(BaseModel):
                     "metatwin": "MetaTwin",
                     "硅基手表": "硅基手表",
                     "siwatch": "硅基手表",
-                    "dexcom": "Dexcom G7",
-                    "dexcom g7": "Dexcom G7",
-                    "g7": "Dexcom G7",
-                    "libre": "FreeStyle Libre",
-                    "三诺": "三诺爱看",
-                    "cgm": "CGM",
-                    "cgm 传感器": "CGM",
-                    "传感器": "CGM",
+                    "硅基健康app": "硅基健康APP",
+                    "健康app": "硅基健康APP",
                 }.get(prod.lower().strip(), prod)
                 entities["product"] = prod_mapped
             normalized["entities"] = entities
@@ -332,6 +326,7 @@ class AgentState(TypedDict, total=False):
     active_agent: ActiveAgent
     empathy_prefix: str | None
     current_topic: str | None
+    current_issue: str | None
     retrieved_docs: list[RetrievedDoc]
     debug_trace: dict[str, Any]
     answer: str
@@ -341,5 +336,6 @@ class AgentState(TypedDict, total=False):
     turn_relation: TurnRelation
     resolved_user_message: str | None
     failed_rag_count: int
+    consecutive_angry_count: int
     handoff_reason: str | None
     handoff_summary: str | None

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from .agent.graph import CustomerAgent
 from .agent.models import PerceptionResult, RetrievedDoc
+from .config import DemoSettings, get_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             if self.path in {"/", "/index.html"}:
-                self._send_text(HTML_PAGE, content_type="text/html; charset=utf-8")
+                self._send_text(_read_index_html(), content_type="text/html; charset=utf-8")
                 return
             if self.path == "/api/health":
                 self._send_json({"ok": True})
@@ -69,7 +70,11 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
                     )
                     return
                 result = agent.invoke(message, thread_id=thread_id)
-                self._send_json(_state_to_response(result, thread_id=thread_id))
+                self._send_json(
+                    _state_to_response(
+                        result, thread_id=thread_id, settings=agent.settings
+                    )
+                )
             except Exception as exc:  # pragma: no cover - request safety net
                 LOGGER.exception("chat request failed")
                 self._send_json(
@@ -105,9 +110,21 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
     return DemoRequestHandler
 
 
-def _state_to_response(state: dict[str, Any], *, thread_id: str) -> dict[str, Any]:
+def _state_to_response(
+    state: dict[str, Any],
+    *,
+    thread_id: str,
+    settings: DemoSettings | None = None,
+) -> dict[str, Any]:
+    resolved_settings = settings or get_settings()
     perception = state.get("perception")
     docs = state.get("retrieved_docs") or []
+    current_topic = state.get("current_topic")
+    perception_dict = _model_to_dict(perception)
+    if perception_dict and isinstance(perception_dict, dict) and current_topic:
+        entities = perception_dict.setdefault("entities", {})
+        if isinstance(entities, dict) and not entities.get("product"):
+            entities["product"] = current_topic
     return {
         "thread_id": thread_id,
         "answer": state.get("answer") or "",
@@ -117,7 +134,11 @@ def _state_to_response(state: dict[str, Any], *, thread_id: str) -> dict[str, An
         "handoff_reason": state.get("handoff_reason"),
         "handoff_summary": state.get("handoff_summary"),
         "failed_rag_count": state.get("failed_rag_count", 0),
-        "perception": _model_to_dict(perception),
+        "consecutive_angry_count": state.get("consecutive_angry_count", 0),
+        "max_angry_turns": resolved_settings.agent_max_angry_turns,
+        "current_topic": current_topic,
+        "current_issue": state.get("current_issue"),
+        "perception": perception_dict,
         "intent_draft": _model_to_dict(state.get("intent_draft")),
         "perception_trace": state.get("perception_trace") or {},
         "secondary_intents": perception.secondary_intents if perception else [],

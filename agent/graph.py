@@ -200,6 +200,7 @@ class CustomerAgent:
                 draft,
                 message=message,
                 current_topic=state.get("current_topic"),
+                current_issue=state.get("current_issue"),
                 pending_clarification=pending,
                 turn_relation=relation,
                 classifier_source=source,
@@ -222,8 +223,10 @@ class CustomerAgent:
         else:
             pending = None
         topic = state.get("current_topic")
+        issue = state.get("current_issue")
         if perception.is_general_query:
             topic = None
+            issue = None
         elif perception.actionability == "ready" and perception.intent in {
             "产品咨询",
             "使用问题",
@@ -231,6 +234,10 @@ class CustomerAgent:
             topic = perception.entities.product or _resolve_topic_with_rag(
                 resolved_message, topic, self.rag_service
             )
+            if relation == "new_request":
+                issue = perception.entities.issue
+            else:
+                issue = perception.entities.issue or issue
         active_agent = _select_active_agent(perception, state.get("active_agent"))
         if perception.actionability == "needs_clarification":
             active_agent = (
@@ -248,14 +255,19 @@ class CustomerAgent:
             "policy_reason": perception.policy_reason,
             "route": active_agent,
         }
+        prev_angry_count = state.get("consecutive_angry_count", 0)
+        is_negative = perception.emotion in {"愤怒", "不满"} or any(w in message for w in ("烂产品", "服了", "还是不行", "垃圾", "太差"))
+        consecutive_angry_count = prev_angry_count + 1 if is_negative else 0
         update: AgentState = {
             "perception": perception,
             "current_topic": topic,
+            "current_issue": issue,
             "active_agent": active_agent,
             "pending_clarification": pending,
             "resolved_user_message": resolved_message,
             "dialogue_status": "ready",
             "perception_trace": trace,
+            "consecutive_angry_count": consecutive_angry_count,
         }
         if perception.actionability == "needs_clarification":
             update["dialogue_status"] = "awaiting_clarification"
@@ -273,7 +285,7 @@ class CustomerAgent:
         perception = state["perception"]
         pending = state.get("pending_clarification")
         if pending is None:
-            answer = "请再补充一下你想咨询的产品或具体问题。"
+            answer = "请再补充一下你想咨询的产品（如 GS1、ECO、GS3）或具体问题。"
             return _non_rag_update(answer, dialogue_status="awaiting_clarification")
 
         question = perception.clarification.question or "请再补充一下具体信息。"
@@ -313,12 +325,13 @@ class CustomerAgent:
             state["messages"]
         )
 
+        issue_val = perception.entities.issue or state.get("current_issue")
         # 调用感知服务动态生成个性化共情话术
         empathy_speech = self.perception_service.generate_empathy(
             user_message,
             intent=perception.intent,
             handoff_requested=perception.handoff_requested,
-            issue=perception.entities.issue,
+            issue=issue_val,
         )
 
         # A. 涉及售后/退换货/明确要人工 -> 交给售后节点生成统一摘要。
@@ -330,14 +343,25 @@ class CustomerAgent:
                 "handoff_reason": reason,
             })
 
-        # B. 情绪强烈但信息还不够 -> 共情后交给澄清节点追问一个槽位。
+        # B. 连续 2 轮情绪愤怒（安抚无效） -> 自动触发离散状态机升级转人工售后节点。
+        angry_count = state.get("consecutive_angry_count", 0)
+        max_angry = self.settings.agent_max_angry_turns
+        if angry_count >= max_angry:
+            reason = f"用户连续 {angry_count} 轮情绪负面/排障无效（达到配置上限 {max_angry} 轮），判定为安抚无效，已自动开启离散状态机触发升级转人工。"
+            return Command(goto="after_sales", update={
+                "active_agent": "after_sales",
+                "empathy_prefix": empathy_speech,
+                "handoff_reason": reason,
+            })
+
+        # C. 情绪强烈但信息还不够 -> 共情后交给澄清节点追问一个槽位。
         if perception.actionability == "needs_clarification":
             return Command(goto="clarify", update={
                 "active_agent": "clarify",
                 "empathy_prefix": empathy_speech,
             })
 
-        # C. 产品/使用问题 -> 交给产品节点执行 RAG，不在本节点重复业务逻辑。
+        # D. 产品/使用问题 -> 交给产品节点执行 RAG，不在本节点重复业务逻辑。
         if perception.intent in {"产品咨询", "使用问题"}:
             return Command(goto="product_consultant", update={
                 "active_agent": "product_consultant",
@@ -407,9 +431,41 @@ class CustomerAgent:
         return update
 
     def _smalltalk(self, state: AgentState) -> AgentState:
-        """【闲聊节点】：简单的问候回复，不调用 RAG"""
+        """【闲聊节点】：通过 LLM 渲染表达多样化且强绑定 CGM 领域的问候/闲聊回复"""
         perception = state.get("perception")
-        if perception and perception.actionability == "unsupported":
+        user_message = state.get("resolved_user_message") or _last_human_message(state["messages"])
+        is_out_of_scope = bool(perception and perception.actionability == "unsupported")
+
+        if self.settings.llm_configured:
+            try:
+                from langchain_core.messages import HumanMessage, SystemMessage
+                from langchain_openai import ChatOpenAI
+
+                chat = ChatOpenAI(
+                    api_key=self.settings.llm_api_key,
+                    base_url=self.settings.llm_api_base,
+                    model=self.settings.llm_model,
+                    temperature=0.7,
+                    max_tokens=2048,
+                    extra_body=self.settings.llm_extra_body,
+                )
+                system_prompt = render_prompt(
+                    "smalltalk.jinja2",
+                    is_out_of_scope=is_out_of_scope,
+                    message=user_message,
+                )
+                res = chat.invoke(
+                    [
+                        SystemMessage(content=system_prompt),
+                        HumanMessage(content=user_message),
+                    ]
+                )
+                answer = str(res.content).strip()
+                return _non_rag_update(answer, dialogue_status="completed")
+            except Exception:
+                pass
+
+        if is_out_of_scope:
             answer = "这个问题不在当前 CGM 客服能力范围内。我可以帮你查询产品信息、排查使用问题或处理售后诉求。"
         else:
             answer = (
@@ -450,7 +506,7 @@ class CustomerAgent:
         perception = state.get("perception")
         if perception is None:
             return "smalltalk"
-        if perception.emotion == "愤怒":
+        if perception.emotion in {"愤怒", "不满"} or state.get("consecutive_angry_count", 0) >= 1:
             return "empathy_agent"
         if perception.handoff_requested or perception.intent == "售后诉求":
             return "after_sales"
@@ -599,15 +655,17 @@ def _map_product_tags_to_topic(product_tags: list[str]) -> str | None:
     if "手表" in product:
         return "硅基手表"
     if "健康app" in p_lower:
-        return "硅基动感健康APP"
-    if "dexcom" in p_lower or "g7" in p_lower:
-        return "Dexcom G7"
-    if "libre" in p_lower or "freestyle" in p_lower:
-        return "FreeStyle Libre"
-    if "三诺" in p_lower:
-        return "三诺爱看 CGM"
-    if "硅基" in p_lower or "sibionics" in p_lower:
-        return "硅基动感 CGM"
+        return "硅基健康APP"
+    if "gs3" in p_lower:
+        return "GS3"
+    if "gs1" in p_lower:
+        return "GS1"
+    if "eco" in p_lower:
+        return "ECO"
+    if "ks3" in p_lower:
+        return "KS3"
+    if "metatwin" in p_lower:
+        return "MetaTwin"
     return product
 
 
@@ -615,7 +673,7 @@ def _resolve_topic(message: str, existing: str | None) -> str | None:
     """只依据消息中的明确产品关键词解析话题，不触发检索。"""
     lowered = message.lower()
     topics = {
-        "gs1 pro": "GS1 Pro",
+        "gs1 pro": "GS1",
         "gs1": "GS1",
         "gs3": "GS3",
         "eco": "ECO",
@@ -623,13 +681,10 @@ def _resolve_topic(message: str, existing: str | None) -> str | None:
         "ks3": "KS3",
         "硅基手表": "硅基手表",
         "手表": "硅基手表",
-        "硅基动感健康app": "硅基动感健康APP",
-        "健康app": "硅基动感健康APP",
-        "dexcom": "Dexcom G7",
-        "g7": "Dexcom G7",
-        "libre": "FreeStyle Libre",
-        "三诺": "三诺爱看 CGM",
-        "硅基": "硅基动感 CGM",
+        "硅基动感健康app": "硅基健康APP",
+        "健康app": "硅基健康APP",
+        "硅基健康app": "硅基健康APP",
+        "加固贴": "硅基动感 CGM",
     }
     for keyword, topic in topics.items():
         if keyword in lowered or keyword in message:
@@ -640,16 +695,9 @@ def _resolve_topic(message: str, existing: str | None) -> str | None:
 def _resolve_topic_with_rag(
     message: str, existing: str | None, rag_service: RagService
 ) -> str | None:
-    """
-    从用户消息中识别产品话题（通过关键词匹配和 RAG 动态匹配相结合）。
-
-    - 优先显式匹配品牌/型号关键词。
-    - 若没有显式匹配，利用 RAG 的无偏检索匹配相关产品。
-      如果无偏检索到的文档相关度很高，并且优于在当前锁定话题下的检索评分，则进行话题转移。
-    """
     lowered = message.lower()
     topics = {
-        "gs1 pro": "GS1 Pro",
+        "gs1 pro": "GS1",
         "gs1": "GS1",
         "gs3": "GS3",
         "eco": "ECO",
@@ -657,13 +705,9 @@ def _resolve_topic_with_rag(
         "ks3": "KS3",
         "硅基手表": "硅基手表",
         "手表": "硅基手表",
-        "硅基动感健康app": "硅基动感健康APP",
-        "健康app": "硅基动感健康APP",
-        "dexcom": "Dexcom G7",
-        "g7": "Dexcom G7",
-        "libre": "FreeStyle Libre",
-        "三诺": "三诺爱看 CGM",
-        "硅基": "硅基动感 CGM",
+        "硅基动感健康app": "硅基健康APP",
+        "健康app": "硅基健康APP",
+        "硅基健康app": "硅基健康APP",
     }
     for keyword, topic in topics.items():
         if keyword in lowered or keyword in message:

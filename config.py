@@ -50,13 +50,26 @@ class DemoSettings(BaseSettings):
     agent_llm_graders_enabled: bool = True
     agent_intent_confidence_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     agent_max_clarification_turns: int = Field(default=2, ge=1, le=5)
+    agent_max_angry_turns: int = Field(default=3, ge=1, le=10)
     agent_perception_history_turns: int = Field(default=6, ge=1, le=20)
     agent_run_log_enabled: bool = True
     agent_run_log_dir: Path = Field(default_factory=lambda: DEMO_ROOT / "data" / "runs")
     demo_chunking_strategy: str = "structural"
+    langchain_tracing_v2: bool = True
+    langchain_project: str = "agent-demo"
+    langchain_api_key: str | None = Field(default=None)
 
     @model_validator(mode="after")
     def normalize(self) -> "DemoSettings":
+        import os
+
+        if self.langchain_tracing_v2:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        if self.langchain_project:
+            os.environ["LANGCHAIN_PROJECT"] = self.langchain_project
+        if self.langchain_api_key:
+            os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key
+
         self.qdrant_url = self.qdrant_url.strip().rstrip("/")
         self.qdrant_collection = (
             self.qdrant_collection.strip() or "cgm_customer_support"

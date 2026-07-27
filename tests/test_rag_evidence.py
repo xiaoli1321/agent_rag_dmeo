@@ -3,7 +3,9 @@ from __future__ import annotations
 from ..agent.models import RetrievedDoc
 from ..agent.rag import (
     RagService,
+    _ensure_answer_body,
     _explicit_product_tags,
+    _fallback_grounded_answer,
     _qdrant_product_filter,
     _strip_generated_references,
     dedupe_retrieved_sources,
@@ -326,3 +328,60 @@ def test_strip_generated_references_with_doc_titles() -> None:
     doc2 = _doc("一些测试文本")
     doc2.source_title = "ECO产品介绍-旧"
     assert _strip_generated_references(answer2, [doc2]) == "测试答案2。"
+
+
+def test_strip_does_not_eat_body_with_source_word() -> None:
+    """正文里出现「来源」不应被当成引用头整段清空。"""
+    answer = "来源可能是蓝牙干扰。\n请先重启手机蓝牙后再试。"
+    assert _strip_generated_references(answer) == answer
+
+
+def test_reference_only_answer_falls_back_to_evidence_summary() -> None:
+    docs = [
+        _doc("蓝牙连不上时，先打开手机蓝牙并重启健康 App。"),
+        _doc("确认传感器在有效期内，再重新配对。"),
+    ]
+    docs[0].source_title = "GS3-蓝牙连接"
+    docs[1].source_title = "健康APP排障"
+
+    raw = (
+        "引用：\n"
+        "[1] GS3-蓝牙连接 - https://example.com/a\n"
+        "[2] 健康APP排障 - https://example.com/b"
+    )
+    stripped = _strip_generated_references(raw, docs)
+    assert stripped == ""
+
+    body = _ensure_answer_body(stripped, docs, raw_answer=raw)
+    assert body == _fallback_grounded_answer(docs)
+    assert "蓝牙连不上" in body
+    assert "引用：" not in body
+
+
+def test_empty_llm_answer_uses_evidence_fallback_in_pipeline() -> None:
+    class StubRagService(RagService):
+        def retrieve(
+            self, question: str, *, topic_hint: str | None = None
+        ) -> list[RetrievedDoc]:
+            return [_doc("蓝牙连不上时，先打开手机蓝牙并重启健康 App。", score=0.9)]
+
+        def _generate_answer(self, question: str, docs: list[RetrievedDoc]) -> str:
+            return (
+                "引用：\n"
+                "[1] Dexcom G7 FAQ - https://example.com"
+            )
+
+        def check_hallucination(self, answer: str, docs: list[RetrievedDoc]):
+            from ..agent.models import HallucinationDecision
+
+            return HallucinationDecision(
+                status="grounded", reason="test_skip", grader="heuristic"
+            )
+
+    service = StubRagService(settings=_test_settings())
+    result = service.answer("蓝牙连接不上")
+
+    assert result.answer_status == "grounded"
+    assert "蓝牙连不上" in result.answer
+    assert "引用：" in result.answer
+    assert result.debug_trace.get("generation_warning") == "empty_answer_body_fallback"

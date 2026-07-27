@@ -1,10 +1,12 @@
 <html lang="zh-CN" data-theme="light">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CGM 智能客服 Agent 演示系统</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
   <div class="app-layout">
     <!-- Sidebar -->
@@ -12,7 +14,9 @@
       <div class="sidebar-header">
         <div class="logo-area">
           <div class="logo-icon-wrapper">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
           </div>
           <div class="logo-text-group">
             <span class="logo-title">CGM 智能客服</span>
@@ -20,24 +24,32 @@
           </div>
         </div>
       </div>
-      
+
       <div class="sidebar-action">
         <button id="new-thread" class="btn btn-primary" type="button">
-          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.2" fill="none"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.2" fill="none">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
           <span>新建对话</span>
         </button>
       </div>
 
       <!-- Search Conversations -->
       <div class="search-box">
-        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
         <input type="text" id="search-threads" placeholder="搜索历史会话..." autocomplete="off">
       </div>
 
       <div class="sidebar-scroll">
         <section class="section">
           <h3 class="section-title">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
             历史会话
           </h3>
           <div id="conversations" class="conversations-list"></div>
@@ -45,24 +57,47 @@
 
         <section class="section">
           <h3 class="section-title">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon
+                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
             推荐示例
           </h3>
           <div class="samples">
             <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="12 8 8 12 12 16 12 8"></polygon></svg>
-              <span>Dexcom G7 可以戴着洗澡或游泳吗？</span>
+              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polygon points="12 8 8 12 12 16 12 8"></polygon>
+              </svg>
+              <span>GS3 测量的数据不准</span>
             </button>
             <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-              <span>传感器的 App 配对连接码是几位数？</span>
+              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span>GS3 传感器连不上手机蓝牙，怎么排查？</span>
             </button>
             <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <rect x="1" y="3" width="15" height="13"></rect>
+                <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon>
+                <circle cx="5.5" cy="18.5" r="2.5"></circle>
+                <circle cx="18.5" cy="18.5" r="2.5"></circle>
+              </svg>
               <span>查询订单：我的订单为什么还没发货？</span>
             </button>
             <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
+                </path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
               <span>传感器刚贴上就断连了，我要投诉，转人工！</span>
             </button>
           </div>
@@ -75,7 +110,10 @@
       <header class="app-header">
         <div class="header-left">
           <button id="toggle-sidebar" class="icon-btn" title="折叠侧边栏">
-            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
           </button>
           <div class="status-indicator">
             <span class="pulse-dot"></span>
@@ -84,10 +122,16 @@
         </div>
         <div class="header-right">
           <button id="toggle-theme" class="icon-btn" title="切换主题">
-            <svg id="theme-icon" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none"></svg>
+            <svg id="theme-icon" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2"
+              fill="none"></svg>
           </button>
           <button id="toggle-inspector" class="btn-inspector-toggle" title="Agent 调试控制台">
-            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path
+                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z">
+              </path>
+            </svg>
             <span>调试控制台</span>
           </button>
         </div>
@@ -97,7 +141,7 @@
         <div id="messages" class="messages-container">
           <!-- Empty State Inside JS -->
         </div>
-        
+
         <!-- Composer input bar -->
         <div class="composer-container">
           <form id="form" class="composer-form">
@@ -111,7 +155,10 @@
               </div>
               <button id="send" type="submit" class="btn btn-accent">
                 <span>发送</span>
-                <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.5" fill="none"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2.5" fill="none">
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
               </button>
             </div>
           </form>
@@ -127,11 +174,16 @@
     <aside class="inspector" id="inspector">
       <div class="inspector-header">
         <h3>
-          <svg viewBox="0 0 24 24" width="16" height="16" stroke="var(--accent-solid)" stroke-width="2.2" fill="none"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="var(--accent-solid)" stroke-width="2.2" fill="none">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+          </svg>
           Agent 调试控制台
         </h3>
         <button id="close-inspector" class="icon-btn-small" title="关闭控制台">
-          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
         </button>
       </div>
 
@@ -142,7 +194,7 @@
         <button class="tab-btn" data-tab="tab-trace" type="button">⚡ 链路追踪</button>
         <button class="tab-btn" data-tab="tab-guide" type="button">💡 异常指引</button>
       </div>
-      
+
       <div class="inspector-scroll">
         <!-- Tab 1: Intent & Diagnosis -->
         <div id="tab-intent" class="tab-content active">
@@ -150,14 +202,22 @@
             <div id="state" class="state-grid">
               <div class="state-item"><strong>主要意图</strong><span class="badge" id="state-intent">-</span></div>
               <div class="state-item"><strong>情绪状态</strong><span class="badge" id="state-emotion">-</span></div>
-              <div class="state-item"><strong>激活 Agent</strong><span class="badge badge-accent" id="state-agent">-</span></div>
+              <div class="state-item"><strong>安抚失效次数</strong><span class="badge" id="state-angry-count">0/2 次</span></div>
+              <div class="state-item"><strong>激活 Agent</strong><span class="badge badge-accent"
+                  id="state-agent">-</span></div>
               <div class="state-item"><strong>回答状态</strong><span class="badge" id="state-status">-</span></div>
-              <div class="state-item col-span-2"><strong>已提取槽位实体 (Entities)</strong><span class="val-text" id="state-entities">-</span></div>
-              <div class="state-item col-span-2"><strong>缺失槽位 (Missing Slots)</strong><span class="val-text" id="state-missing-slots">-</span></div>
-              <div class="state-item col-span-2"><strong>次要意图</strong><span class="val-text" id="state-secondary-intents">-</span></div>
-              <div class="state-item col-span-2"><strong>澄清请求说明</strong><span class="val-text" id="state-clarification">-</span></div>
-              <div class="state-item col-span-2"><strong>RAG 检索策略</strong><span class="code-text" id="state-strategy">-</span></div>
-              <div class="state-item col-span-2"><strong>证据决策理由</strong><span class="val-text" id="state-reason">-</span></div>
+              <div class="state-item col-span-2"><strong>已提取槽位实体 (Entities)</strong><span class="val-text"
+                  id="state-entities">-</span></div>
+              <div class="state-item col-span-2"><strong>缺失槽位 (Missing Slots)</strong><span class="val-text"
+                  id="state-missing-slots">-</span></div>
+              <div class="state-item col-span-2"><strong>次要意图</strong><span class="val-text"
+                  id="state-secondary-intents">-</span></div>
+              <div class="state-item col-span-2"><strong>澄清请求说明</strong><span class="val-text"
+                  id="state-clarification">-</span></div>
+              <div class="state-item col-span-2"><strong>RAG 检索策略</strong><span class="code-text"
+                  id="state-strategy">-</span></div>
+              <div class="state-item col-span-2"><strong>证据决策理由</strong><span class="val-text"
+                  id="state-reason">-</span></div>
             </div>
           </div>
         </div>
@@ -224,4 +284,5 @@
   </div>
   <script src="app.js"></script>
 </body>
+
 </html>

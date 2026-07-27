@@ -186,6 +186,8 @@
       document.querySelector("#state-reason").textContent = "-";
       document.querySelector("#state-intent").className = "badge";
       document.querySelector("#state-emotion").className = "badge";
+      document.querySelector("#state-angry-count").textContent = "0/2 次";
+      document.querySelector("#state-angry-count").className = "badge";
       
       refs.innerHTML = '<div class="empty-state-mini">无召回文档数据</div>';
       defense.innerHTML = '<div class="empty-state-mini">无链路追踪数据</div>';
@@ -258,37 +260,6 @@
             </div>
             <h2 class="empty-state-title">CGM 智能血糖客服</h2>
             <p class="empty-state-subtitle">内置 Self-RAG/CRAG 双重防护网与 Multi-Agent 分流协同架构，保障医疗级客服的高准确度与极低幻觉率。</p>
-
-            <div class="hero-features-grid">
-              <div class="hero-feature-card">
-                <div class="hero-feature-title">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent-solid)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                  <span>Self-RAG 证据防护网</span>
-                </div>
-                <div class="hero-feature-desc">通过 LLM Grader 逐级判定文档真实性与关联度，防范回答幻觉与跨文本捏造。</div>
-              </div>
-              <div class="hero-feature-card">
-                <div class="hero-feature-title">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent-solid)" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                  <span>Swarm Agent 动态编排</span>
-                </div>
-                <div class="hero-feature-desc">针对产品咨询、订单售后及负面情绪，实现秒级 Swarm 路由与安抚。</div>
-              </div>
-              <div class="hero-feature-card">
-                <div class="hero-feature-title">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent-solid)" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                  <span>Qdrant 混合向量检索</span>
-                </div>
-                <div class="hero-feature-desc">高维 Dense 向量与关键词 BM25 稀疏检索 RRF 融合，准确召回产品说明。</div>
-              </div>
-              <div class="hero-feature-card">
-                <div class="hero-feature-title">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--accent-solid)" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-                  <span>全链路可视化 Trace</span>
-                </div>
-                <div class="hero-feature-desc">调试控制台实时呈现意图解析、召回得分、C1 防线闭环及状态跳跃。</div>
-              </div>
-            </div>
           </div>
         `;
         return;
@@ -436,13 +407,25 @@
       emotionBadge.textContent = perception.emotion || "-";
       emotionBadge.className = "badge";
       if (perception.emotion) {
-        if (perception.emotion === "angry" || perception.emotion === "anxious") {
+        if (perception.emotion === "angry" || perception.emotion === "anxious" || perception.emotion === "愤怒" || perception.emotion === "不满") {
           emotionBadge.classList.add("badge-danger");
-        } else if (perception.emotion === "happy" || perception.emotion === "satisfied") {
+        } else if (perception.emotion === "happy" || perception.emotion === "satisfied" || perception.emotion === "平静") {
           emotionBadge.classList.add("badge-accent");
         } else {
           emotionBadge.classList.add("badge-info");
         }
+      }
+
+      const angryCountBadge = document.querySelector("#state-angry-count");
+      const angryCount = payload.consecutive_angry_count || 0;
+      const maxAngryTurns = payload.max_angry_turns || 3;
+      angryCountBadge.textContent = `${angryCount}/${maxAngryTurns} 次`;
+      angryCountBadge.className = "badge";
+      if (angryCount >= maxAngryTurns) {
+        angryCountBadge.classList.add("badge-danger");
+        angryCountBadge.textContent = `${angryCount}/${maxAngryTurns} 次 (触发转人工)`;
+      } else if (angryCount > 0) {
+        angryCountBadge.classList.add("badge-danger");
       }
 
       document.querySelector("#state-agent").textContent = payload.active_agent || "-";
@@ -452,8 +435,9 @@
       const entities = perception.entities || {};
       const entitiesContainer = document.querySelector("#state-entities");
       entitiesContainer.innerHTML = "";
+      const productVal = entities.product || payload.current_topic;
       const entityItems = [
-        { key: "product", label: "产品型号", value: entities.product, color: "badge-accent" },
+        { key: "product", label: "产品型号", value: productVal, color: "badge-accent" },
         { key: "issue", label: "故障/现象", value: entities.issue, color: "badge-danger" },
         { key: "requested_action", label: "业务动作", value: entities.requested_action, color: "badge-info" }
       ].filter(item => item.value);

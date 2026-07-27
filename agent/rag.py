@@ -24,8 +24,9 @@ from .prompts import load_prompt
 from ..config import DemoSettings
 
 
+# 仅匹配答案末尾的「引用区块」标题，避免误伤正文中的「参考/来源」字样。
 REFERENCE_SECTION_PATTERN = re.compile(
-    r"(?:^|\n)\s*(?:引用|引用列表|参考|参考资料|参考来源|资料来源|来源)\s*(?:如下|列表)?\s*[:：]?\s*\n?[\s\S]*$",
+    r"(?:^|\n)\s*(?:引用|引用列表|参考资料|参考来源|资料来源)\s*(?:如下|列表)?\s*[:：]\s*\n?[\s\S]*$",
     re.IGNORECASE,
 )
 REFERENCE_LINE_PATTERN = re.compile(
@@ -53,7 +54,7 @@ STOPWORDS = {
     "一下",
 }
 PRODUCT_TAG_ALIASES = {
-    "gs1 pro": "GS1 Pro",
+    "gs1 pro": "GS1",
     "gs1": "GS1",
     "gs3": "GS3",
     "eco": "ECO",
@@ -61,8 +62,9 @@ PRODUCT_TAG_ALIASES = {
     "ks3": "KS3",
     "硅基手表": "硅基手表",
     "手表": "硅基手表",
-    "硅基动感健康app": "硅基动感健康APP",
-    "健康app": "硅基动感健康APP",
+    "硅基动感健康app": "硅基健康APP",
+    "健康app": "硅基健康APP",
+    "硅基健康app": "硅基健康APP",
 }
 T = TypeVar("T")
 
@@ -198,13 +200,15 @@ class RagService:
             )
 
         # 步骤 5: 基于召回的关联文档生成回答
-        answer = _strip_generated_references(
-            _timed_step(
-                pipeline_steps,
-                "generate",
-                lambda: self._generate_answer(rewritten_question, docs),
-            ),
+        raw_answer = _timed_step(
+            pipeline_steps,
+            "generate",
+            lambda: self._generate_answer(rewritten_question, docs),
+        )
+        answer = _ensure_answer_body(
+            _strip_generated_references(raw_answer, docs),
             docs,
+            raw_answer=raw_answer,
         )
         _annotate_last_step(
             pipeline_steps, status="grounded", output_summary=_summarize_text(answer)
@@ -213,6 +217,10 @@ class RagService:
         # 检查生成内容中是否包含类似“无法回答/未找到依据”的兜底话术
         if _looks_like_insufficient_answer(answer):
             debug_trace["generation_warning"] = "llm_refused_after_grounded_retrieval"
+        if not raw_answer.strip() or answer == _fallback_grounded_answer(docs):
+            debug_trace["generation_warning"] = debug_trace.get(
+                "generation_warning"
+            ) or "empty_answer_body_fallback"
 
         # 在生成答案末尾附加上格式化后的引用文档列表
         answer = f"{answer.rstrip()}\n\n{format_references(docs)}"
@@ -533,7 +541,7 @@ class RagService:
             doc.chunk_text[:600] for doc in (rejected_docs or [])
         )
         try:
-            chat = self._structured_chat(max_tokens=300)
+            chat = self._structured_chat(max_tokens=2048)
             return chat.with_structured_output(QueryRewrite, method="json_mode").invoke(
                 load_prompt("rag_rewrite.md").format(
                     question=stripped,
@@ -696,7 +704,7 @@ class RagService:
             base_url=self.settings.llm_api_base,
             model=self.settings.llm_model,
             temperature=self.settings.llm_temperature,
-            max_tokens=min(self.settings.llm_max_tokens, 800),
+            max_tokens=min(self.settings.llm_max_tokens, 2048),
             extra_body=self.settings.llm_extra_body,
         )
         try:
@@ -708,7 +716,8 @@ class RagService:
                         )
                     ),
                     HumanMessage(content=question),
-                ]
+                ],
+                config={"run_name": "RAGAnswerGeneratorLLM"},
             )
         except Exception:
             return _fallback_grounded_answer(docs)
@@ -738,7 +747,7 @@ class RagService:
         """
         调用 LLM 对文档块与提问的实际相关性进行结构化输出判定。
         """
-        chat = self._structured_chat(max_tokens=250)
+        chat = self._structured_chat(max_tokens=2048)
         prompt = load_prompt("rag_document_grader.md").format(
             question=question, document=doc.chunk_text
         )
@@ -750,7 +759,7 @@ class RagService:
         """
         调用 LLM 判断生成的回答是否可以被给定的参考证据（文档）充分蕴含支撑（避免语义级别的幻觉问题）。
         """
-        chat = self._structured_chat(max_tokens=350)
+        chat = self._structured_chat(max_tokens=2048)
         prompt = load_prompt("rag_grounding_grader.md").format(
             answer=answer, evidence=evidence
         )
@@ -938,8 +947,15 @@ def _strip_generated_references(
 ) -> str:
     """
     去除 LLM 输出末尾可能自行生成的冗余引用文献格式，以便使用我们规范的 `format_references` 生成。
+
+    只清理末尾引用区块/引用行；若清理后正文为空但原文有实质内容，保留原文（避免把
+    正文中的「参考/来源」误当成引用头导致整段被吃掉）。
     """
-    stripped = REFERENCE_SECTION_PATTERN.sub("", answer).strip()
+    original = (answer or "").strip()
+    if not original:
+        return ""
+
+    stripped = REFERENCE_SECTION_PATTERN.sub("", original).strip()
     lines = stripped.splitlines()
     while lines:
         last_line = lines[-1].strip()
@@ -967,7 +983,80 @@ def _strip_generated_references(
                         lines.pop()
                         continue
         break
-    return "\n".join(lines).strip()
+    result = "\n".join(lines).strip()
+
+    # 若清理后为空，仅当原文本身就是纯引用区块时才接受空结果；否则回退原文。
+    if not result:
+        if _is_reference_only_answer(original, docs):
+            return ""
+        logger.warning(
+            "strip_references: emptied non-reference answer; keeping original body"
+        )
+        return original
+    return result
+
+
+def _is_reference_only_answer(
+    answer: str, docs: list[RetrievedDoc] | None = None
+) -> bool:
+    """判断文本是否几乎只有引用标题/引用行，没有可展示的正文。"""
+    text = (answer or "").strip()
+    if not text:
+        return True
+    body = REFERENCE_SECTION_PATTERN.sub("", text).strip()
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    if not lines:
+        return True
+    for line in lines:
+        if REFERENCE_LINE_PATTERN.match(line):
+            continue
+        if docs:
+            match = re.match(r"^\s*\[\d+\]\s*(.+)$", line)
+            if match:
+                content_norm = _normalize_title(match.group(1))
+                if content_norm and any(
+                    (title := _normalize_title(doc.source_title))
+                    and (content_norm in title or title in content_norm)
+                    for doc in docs
+                ):
+                    continue
+        # 允许单独的「引用：」类标题行
+        if re.match(
+            r"^(?:引用|引用列表|参考资料|参考来源|资料来源)\s*(?:如下|列表)?\s*[:：]?\s*$",
+            line,
+            re.IGNORECASE,
+        ):
+            continue
+        return False
+    return True
+
+
+def _ensure_answer_body(
+    answer: str,
+    docs: list[RetrievedDoc],
+    *,
+    raw_answer: str | None = None,
+) -> str:
+    """
+    保证面向用户的答案正文非空。
+    生成结果被剥空、或模型只吐了引用列表时，回退到证据摘要，避免前端只剩「引用：」。
+    """
+    body = (answer or "").strip()
+    if body and not _is_reference_only_answer(body, docs):
+        return body
+
+    raw = (raw_answer or "").strip()
+    if raw and not _is_reference_only_answer(raw, docs):
+        # 尝试从原始输出再剥一次；若仍无正文则走证据兜底
+        recovered = _strip_generated_references(raw, docs)
+        if recovered and not _is_reference_only_answer(recovered, docs):
+            return recovered
+
+    logger.warning(
+        "generate_answer: empty body after strip; fallback to evidence summary docs=%d",
+        len(docs),
+    )
+    return _fallback_grounded_answer(docs)
 
 
 def _looks_like_insufficient_answer(answer: str) -> bool:
@@ -1153,12 +1242,18 @@ def build_rag_subgraph(settings: DemoSettings, rag_service: RagService):
             len(candidates),
             len(docs),
         )
-        answer = rag_service._generate_answer(state["rewritten_question"], docs)
-        answer = _strip_generated_references(answer, docs)
+        raw_answer = rag_service._generate_answer(state["rewritten_question"], docs)
+        answer = _ensure_answer_body(
+            _strip_generated_references(raw_answer, docs),
+            docs,
+            raw_answer=raw_answer,
+        )
 
-        # 检测 LLM 虽获得依据却拒绝回答的情况
+        # 检测 LLM 虽获得依据却拒绝回答的情况 / 正文被剥空
         if _looks_like_insufficient_answer(answer):
             generation_warning = "llm_refused_after_grounded_retrieval"
+        elif not raw_answer.strip() or answer == _fallback_grounded_answer(docs):
+            generation_warning = "empty_answer_body_fallback"
         else:
             generation_warning = None
 
