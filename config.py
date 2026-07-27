@@ -54,6 +54,14 @@ class DemoSettings(BaseSettings):
     agent_perception_history_turns: int = Field(default=6, ge=1, le=20)
     agent_run_log_enabled: bool = True
     agent_run_log_dir: Path = Field(default_factory=lambda: DEMO_ROOT / "data" / "runs")
+
+    # 话题切换阈值（graph.py _resolve_topic_with_rag）
+    agent_topic_switch_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    agent_topic_bias_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    agent_topic_existing_min_score: float = Field(default=0.35, ge=0.0, le=1.0)
+
+    # RAG grader 启发式覆盖率阈值（rag.py _grade_document）
+    agent_grader_coverage_threshold: float = Field(default=0.25, ge=0.0, le=1.0)
     demo_chunking_strategy: str = "structural"
     langchain_tracing_v2: bool = True
     langchain_project: str = "agent-demo"

@@ -105,7 +105,6 @@ def test_heuristic_perception_returns_valid_schema() -> None:
 
 def test_all_structured_output_prompts_omit_redundant_json_format_instructions() -> None:
     for prompt_name in (
-        "perception.md",
         "perception.jinja2",
         "rag_rewrite.md",
         "rag_document_grader.md",

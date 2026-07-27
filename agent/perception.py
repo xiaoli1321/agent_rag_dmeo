@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 
 from .models import (
     ClarificationDecision,
@@ -15,11 +14,14 @@ from .models import (
     PerceptionEntities,
     PerceptionResult,
 )
+from .chat_factory import get_chat
 from .intent_catalog import (
     catalog_prompt_context,
     load_intent_catalog,
+    load_keywords,
     load_slot_catalog,
 )
+from .product_aliases import lookup_product
 from .prompts import load_prompt, render_prompt
 from ..config import DemoSettings, get_settings
 
@@ -71,13 +73,10 @@ class PerceptionService:
             -self.settings.agent_perception_history_turns :
         ]
         history_text = "\n".join(history_rows) or "无"
-        chat = ChatOpenAI(
-            api_key=self.settings.llm_api_key,
-            base_url=self.settings.llm_api_base,
-            model=self.settings.llm_model,
+        chat = get_chat(
+            self.settings,
             temperature=self.temperature,
             max_tokens=min(self.settings.llm_max_tokens, 2048),
-            extra_body=self.settings.llm_extra_body,
         )
         try:
             system_prompt = render_prompt(
@@ -119,13 +118,10 @@ class PerceptionService:
                 message, intent=intent, handoff_requested=handoff_requested, issue=issue
             )
 
-        chat = ChatOpenAI(
-            api_key=self.settings.llm_api_key,
-            base_url=self.settings.llm_api_base,
-            model=self.settings.llm_model,
+        chat = get_chat(
+            self.settings,
             temperature=0.7,
             max_tokens=2048,
-            extra_body=self.settings.llm_extra_body,
         )
         try:
             system_prompt = render_prompt(
@@ -368,53 +364,24 @@ def _is_slot_resolved(slot_key: str, entities: PerceptionEntities) -> bool:
 
 
 def _is_medical_out_of_scope(message: str) -> bool:
-    return any(
-        marker in message
-        for marker in ("低血糖昏迷", "昏迷", "出血", "严重过敏", "呼吸困难", "急救")
-    )
+    markers = load_keywords().get("medical_out_of_scope", ())
+    return any(marker in message for marker in markers)  # type: ignore[union-attr]
 
 
 def _is_vague_device_issue(message: str) -> bool:
     problem_slot = load_slot_catalog().get("problem_detail")
-    vague_values = problem_slot.vague_values if problem_slot else ("坏了", "不行", "有问题", "用不了", "不能用")
+    vague_values = problem_slot.vague_values if problem_slot else ()
     return any(marker in message.strip().lower() for marker in vague_values)
 
 
 def _is_troubleshooting_feedback(message: str) -> bool:
-    feedback_markers = (
-        "还是不行",
-        "按照你的操作",
-        "按你的操作",
-        "按你的方法",
-        "跟着做了",
-        "试了不行",
-        "试过了不行",
-        "没有用",
-        "没效果",
-        "没解决",
-        "烂产品",
-        "烂东西",
-        "服了",
-    )
-    return any(marker in message for marker in feedback_markers)
+    markers = load_keywords().get("troubleshooting_feedback", ())
+    return any(marker in message for marker in markers)  # type: ignore[union-attr]
 
 
 def _has_explicit_handoff_request(message: str) -> bool:
-    return any(
-        marker in message
-        for marker in (
-            "人工",
-            "客服",
-            "坐席",
-            "投诉",
-            "退款",
-            "赔偿",
-            "换货",
-            "退货",
-            "补发",
-            "保修",
-        )
-    )
+    markers = load_keywords().get("handoff", ())
+    return any(marker in message for marker in markers)  # type: ignore[union-attr]
 
 
 def heuristic_perception(
@@ -424,67 +391,27 @@ def heuristic_perception(
     pending_clarification: PendingClarification | None = None,
 ) -> PerceptionResult:
     """Deterministic fallback for local tests and missing model config."""
+    keywords = load_keywords()
+    intent_signals: dict[str, tuple[str, ...]] = keywords.get("intent_signals", {})  # type: ignore[assignment]
+    emotion_signals: dict[str, tuple[str, ...]] = keywords.get("emotion_signals", {})  # type: ignore[assignment]
+    handoff_words: tuple[str, ...] = keywords.get("handoff", ())  # type: ignore[assignment]
+    vague_issue_words: tuple[str, ...] = keywords.get("vague_issue", ())  # type: ignore[assignment]
+    unclear_answers: tuple[str, ...] = keywords.get("unclear_answer", ())  # type: ignore[assignment]
+
     stripped = message.strip()
     text = stripped.lower()
-    handoff_words = ("人工", "客服", "坐席", "投诉", "退款", "赔偿", "换货", "退货")
-    angry_words = ("太差", "垃圾", "气死", "再也不用", "无法接受", "必须马上")
-    aftersales_words = (
-        "订单",
-        "物流",
-        "发货",
-        "退款",
-        "换货",
-        "退货",
-        "保修",
-        "补发",
-        "投诉",
-        "赔偿",
-    )
-    usage_words = (
-        "怎么用",
-        "使用",
-        "连不上",
-        "连接不上",
-        "断连",
-        "无法连接",
-        "搜不到",
-        "扫不上",
-        "连接",
-        "佩戴",
-        "脱落",
-        "读数",
-        "数据不准",
-        "不准",
-        "告警",
-        "校准",
-        "坏了",
-    )
-    product_words = (
-        "防水",
-        "游泳",
-        "洗澡",
-        "cgm",
-        "传感器",
-        "硅基",
-        "血糖",
-        "gs1",
-        "gs3",
-        "eco",
-        "metatwin",
-        "ks3",
-        "手表",
-        "健康app",
-    )
-    greeting_words = ("你好", "您好", "嗨", "hello", "你是谁", "谢谢", "再见")
-    vague_issue_words = {"坏了", "不行", "有问题", "用不了", "不能用"}
-    unclear_answers = {"不知道", "不清楚", "都不是", "不确定", "没注意"}
 
     handoff = any(word in text for word in handoff_words)
-    emotion = "愤怒" if any(word in text for word in angry_words) else "平静"
+    emotion = "愤怒" if any(word in text for word in emotion_signals.get("愤怒", ())) else "平静"
     if emotion == "平静" and any(
-        word in text for word in ("没有用", "不行", "怎么回事", "烦", "服了")
+        word in text for word in emotion_signals.get("不满", ())
     ):
         emotion = "不满"
+
+    usage_words = intent_signals.get("使用问题", ())
+    product_words = intent_signals.get("产品咨询", ())
+    aftersales_words = intent_signals.get("售后诉求", ())
+    greeting_words = intent_signals.get("闲聊", ())
 
     has_aftersales = any(word in text for word in aftersales_words)
     has_usage = any(word in text for word in usage_words)
@@ -722,34 +649,7 @@ def _needs_clarification(
 
 
 def _extract_product(message: str) -> str | None:
-    lowered = message.lower()
-    products = (
-        ("gs1 pro", "GS1"),
-        ("gs3", "GS3"),
-        ("gs1", "GS1"),
-        ("eco", "ECO"),
-        ("metatwin", "MetaTwin"),
-        ("ks3", "KS3"),
-        ("硅基手表", "硅基手表"),
-        ("手表", "硅基手表"),
-        ("硅基健康app", "硅基健康APP"),
-        ("健康app", "硅基健康APP"),
-        ("dexcom g7", "Dexcom G7"),
-        ("g7", "Dexcom G7"),
-        ("dexcom", "Dexcom G7"),
-        ("freestyle libre", "FreeStyle Libre"),
-        ("freestyle", "FreeStyle Libre"),
-        ("libre", "FreeStyle Libre"),
-        ("三诺爱看", "三诺爱看"),
-        ("三诺", "三诺爱看"),
-        ("硅基传感器", "CGM"),
-        ("传感器", "CGM"),
-        ("硅基", "CGM"),
-    )
-    for keyword, product in products:
-        if keyword in lowered:
-            return product  # type: ignore[return-value]
-    return None
+    return lookup_product(message)
 
 
 def _extract_issue(

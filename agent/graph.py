@@ -14,6 +14,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
+from .chat_factory import get_chat
+from .intent_catalog import load_keywords
 from .models import (
     ActiveAgent,
     AgentState,
@@ -24,6 +26,7 @@ from .models import (
     RetrievedDoc,
 )
 from .perception import PerceptionService, decide_perception
+from .product_aliases import load_product_aliases, lookup_product, lookup_aliases
 from .rag import RagService, RagSubgraphState, build_rag_subgraph
 from .run_logger import AgentRunLogger
 from ..config import DemoSettings, get_settings
@@ -149,10 +152,11 @@ class CustomerAgent:
         message = _last_human_message(state["messages"])
         pending = state.get("pending_clarification")
         relation = "new_request"
+        keywords = load_keywords()
         if pending:
             if _looks_like_new_request(message):
                 relation = "new_request"
-            elif any(token in message for token in ("不是", "不对", "改成", "应该是")):
+            elif any(token in message for token in keywords.get("correction", ())):  # type: ignore[union-attr]
                 relation = "correction"
             else:
                 relation = "clarification_answer"
@@ -256,7 +260,7 @@ class CustomerAgent:
             "route": active_agent,
         }
         prev_angry_count = state.get("consecutive_angry_count", 0)
-        is_negative = perception.emotion in {"愤怒", "不满"} or any(w in message for w in ("烂产品", "服了", "还是不行", "垃圾", "太差"))
+        is_negative = perception.emotion in {"愤怒", "不满"} or any(w in message for w in load_keywords().get("negative_feedback", ()))  # type: ignore[union-attr]
         consecutive_angry_count = prev_angry_count + 1 if is_negative else 0
         update: AgentState = {
             "perception": perception,
@@ -438,16 +442,10 @@ class CustomerAgent:
 
         if self.settings.llm_configured:
             try:
-                from langchain_core.messages import HumanMessage, SystemMessage
-                from langchain_openai import ChatOpenAI
-
-                chat = ChatOpenAI(
-                    api_key=self.settings.llm_api_key,
-                    base_url=self.settings.llm_api_base,
-                    model=self.settings.llm_model,
+                chat = get_chat(
+                    self.settings,
                     temperature=0.7,
                     max_tokens=2048,
-                    extra_body=self.settings.llm_extra_body,
                 )
                 system_prompt = render_prompt(
                     "smalltalk.jinja2",
@@ -618,11 +616,10 @@ def _role_labeled_history(messages: list[BaseMessage]) -> list[str]:
 
 def _looks_like_new_request(message: str) -> bool:
     """Only clear pending clarification for an obviously independent request."""
+    keywords = load_keywords()
+    markers = keywords.get("new_topic_switch", ())
     text = message.strip().lower()
-    return any(
-        marker in text
-        for marker in ("天气", "新闻", "股票", "写代码", "讲故事", "写一首诗")
-    )
+    return any(marker in text for marker in markers)  # type: ignore[union-attr]
 
 
 def _non_rag_update(answer: str, *, dialogue_status: str) -> AgentState:
@@ -652,66 +649,33 @@ def _map_product_tags_to_topic(product_tags: list[str]) -> str | None:
         return None
     product = product_tags[0]
     p_lower = product.lower()
-    if "手表" in product:
-        return "硅基手表"
-    if "健康app" in p_lower:
-        return "硅基健康APP"
-    if "gs3" in p_lower:
-        return "GS3"
-    if "gs1" in p_lower:
-        return "GS1"
-    if "eco" in p_lower:
-        return "ECO"
-    if "ks3" in p_lower:
-        return "KS3"
-    if "metatwin" in p_lower:
-        return "MetaTwin"
+    aliases = load_product_aliases()
+    for keyword in sorted(aliases, key=len, reverse=True):
+        if keyword in p_lower:
+            mapped = aliases[keyword]
+            # 还原为产品标准化名称，不要返回 "硅基动感 CGM" 这类通用标签作为话题
+            if mapped not in ("CGM", "硅基动感 CGM"):
+                return mapped
     return product
 
 
 def _resolve_topic(message: str, existing: str | None) -> str | None:
     """只依据消息中的明确产品关键词解析话题，不触发检索。"""
+    # 加固贴 → 硅基动感 CGM 是配件特有映射，不在产品别名中
     lowered = message.lower()
-    topics = {
-        "gs1 pro": "GS1",
-        "gs1": "GS1",
-        "gs3": "GS3",
-        "eco": "ECO",
-        "metatwin": "MetaTwin",
-        "ks3": "KS3",
-        "硅基手表": "硅基手表",
-        "手表": "硅基手表",
-        "硅基动感健康app": "硅基健康APP",
-        "健康app": "硅基健康APP",
-        "硅基健康app": "硅基健康APP",
-        "加固贴": "硅基动感 CGM",
-    }
-    for keyword, topic in topics.items():
-        if keyword in lowered or keyword in message:
-            return topic
-    return existing
+    if "加固贴" in lowered:
+        return "硅基动感 CGM"
+    mapped = lookup_product(message)
+    return mapped if mapped else existing
 
 
 def _resolve_topic_with_rag(
     message: str, existing: str | None, rag_service: RagService
 ) -> str | None:
     lowered = message.lower()
-    topics = {
-        "gs1 pro": "GS1",
-        "gs1": "GS1",
-        "gs3": "GS3",
-        "eco": "ECO",
-        "metatwin": "MetaTwin",
-        "ks3": "KS3",
-        "硅基手表": "硅基手表",
-        "手表": "硅基手表",
-        "硅基动感健康app": "硅基健康APP",
-        "健康app": "硅基健康APP",
-        "硅基健康app": "硅基健康APP",
-    }
-    for keyword, topic in topics.items():
-        if keyword in lowered or keyword in message:
-            return topic
+    mapped = lookup_product(message)
+    if mapped:
+        return mapped
 
     # 代词没有携带新的型号信息，应优先延续已确认的会话主题；否则无偏检索的
     # 高分文档可能把“它防水吗”从 Dexcom G7 错切换到另一个产品。
@@ -735,7 +699,8 @@ def _resolve_topic_with_rag(
     mapped_product = _map_product_tags_to_topic(top_hit.product_tags)
 
     # 如果检索到的最相关文档的分数很高，且产品清晰且不同于当前话题
-    if score >= 0.5 and mapped_product and mapped_product != existing:
+    settings = get_settings()
+    if score >= settings.agent_topic_switch_score and mapped_product and mapped_product != existing:
         if not existing:
             return mapped_product
 
@@ -748,8 +713,8 @@ def _resolve_topic_with_rag(
                 b_hit.final_score if b_hit.final_score is not None else b_hit.score
             )
 
-        # 如果无偏匹配度大幅优于锁定话题的匹配度，或者锁定话题匹配度过低（低于阈值 0.35）
-        if biased_score < 0.35 or score > biased_score + 0.15:
+        # 如果无偏匹配度大幅优于锁定话题的匹配度，或者锁定话题匹配度过低
+        if biased_score < settings.agent_topic_existing_min_score or score > biased_score + settings.agent_topic_bias_threshold:
             return mapped_product
 
     return existing

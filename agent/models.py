@@ -43,6 +43,7 @@ ProductEnum = Literal[
     "硅基手表",
     "硅基健康APP",
     "CGM",
+    "硅基动感 CGM",
 ]
 
 

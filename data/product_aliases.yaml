@@ -1,0 +1,24 @@
+# 产品别名映射表
+# 单一起源：所有产品 keyword→name 映射集中在此文件
+# 修改后需要重新运行 python -m customer_agent_demo.ingest.run 重建向量库
+
+aliases:
+  # ── 硅基自家产品 ──
+  gs1 pro: GS1
+  gs1: GS1
+  gs3: GS3
+  eco: ECO
+  ks3: KS3
+  metatwin: MetaTwin
+
+  # ── 硅基品牌/App ──
+  硅基手表: 硅基手表
+  手表: 硅基手表
+  硅基动感健康app: 硅基健康APP
+  健康app: 硅基健康APP
+  硅基健康app: 硅基健康APP
+
+  # ── 通用 ──
+  硅基传感器: CGM
+  传感器: CGM
+  硅基: CGM

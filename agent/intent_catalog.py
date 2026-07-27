@@ -74,3 +74,27 @@ def catalog_prompt_context() -> str:
         examples = "；".join(definition.examples)
         rows.append(f"- {definition.name}：{definition.description} 示例：{examples}")
     return "\n".join(rows)
+
+
+@lru_cache(maxsize=1)
+def load_keywords() -> dict[str, tuple[str, ...] | dict[str, tuple[str, ...]]]:
+    """Load keyword lists used by the heuristic fallback classifier.
+
+    Returns a nested dict where top-level keys are group names (e.g.
+    ``"intent_signals"``, ``"emotion_signals"``, ``"handoff"``) and values
+    are either ``tuple[str, ...]`` (flat keyword groups) or
+    ``dict[str, tuple[str, ...]]`` (per-category keyword groups).
+    """
+    payload: dict = yaml.safe_load(
+        (DEMO_ROOT / "data" / "intent_catalog.yaml").read_text(encoding="utf-8")
+    )
+    raw: dict = payload.get("keywords", {})
+    result: dict[str, tuple[str, ...] | dict[str, tuple[str, ...]]] = {}
+    for group_key, group_value in raw.items():
+        if isinstance(group_value, dict):
+            result[group_key] = {
+                k: tuple(v) for k, v in group_value.items()
+            }
+        elif isinstance(group_value, list):
+            result[group_key] = tuple(group_value)
+    return result

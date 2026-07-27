@@ -9,6 +9,7 @@ from typing import Callable, TypeVar
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+from .chat_factory import get_chat
 from .embeddings import get_embeddings
 from .models import (
     DocumentGrade,
@@ -20,6 +21,7 @@ from .models import (
     RelevanceGrade,
     RetrievedDoc,
 )
+from .product_aliases import load_product_aliases
 from .prompts import load_prompt
 from ..config import DemoSettings
 
@@ -52,19 +54,6 @@ STOPWORDS = {
     "它",
     "请问",
     "一下",
-}
-PRODUCT_TAG_ALIASES = {
-    "gs1 pro": "GS1",
-    "gs1": "GS1",
-    "gs3": "GS3",
-    "eco": "ECO",
-    "metatwin": "MetaTwin",
-    "ks3": "KS3",
-    "硅基手表": "硅基手表",
-    "手表": "硅基手表",
-    "硅基动感健康app": "硅基健康APP",
-    "健康app": "硅基健康APP",
-    "硅基健康app": "硅基健康APP",
 }
 T = TypeVar("T")
 
@@ -429,7 +418,7 @@ class RagService:
 
         # 2. 启发式双重保险：计算关键词覆盖度和重合度
         overlap, coverage = _keyword_overlap_coverage(question, doc.chunk_text)
-        if overlap == 0 or coverage < 0.25:
+        if overlap == 0 or coverage < self.settings.agent_grader_coverage_threshold:
             return _document_grade(
                 doc,
                 "no",
@@ -691,7 +680,6 @@ class RagService:
             return _fallback_grounded_answer(docs)
 
         from langchain_core.messages import HumanMessage, SystemMessage
-        from langchain_openai import ChatOpenAI
 
         # 整理上下文文档列表，包含标题、源链接、分块编号和具体内容，输入至 LLM System Prompt 中
         context = "\n\n".join(
@@ -699,13 +687,10 @@ class RagService:
             f"id: {doc.chunk_id or 'unknown'}\n{doc.chunk_text}"
             for index, doc in enumerate(docs, start=1)
         )
-        chat = ChatOpenAI(
-            api_key=self.settings.llm_api_key,
-            base_url=self.settings.llm_api_base,
-            model=self.settings.llm_model,
+        chat = get_chat(
+            self.settings,
             temperature=self.settings.llm_temperature,
             max_tokens=min(self.settings.llm_max_tokens, 2048),
-            extra_body=self.settings.llm_extra_body,
         )
         try:
             message = chat.invoke(
@@ -732,15 +717,10 @@ class RagService:
         """
         初始化一个面向结构化输出的 Chat 实例，硬编码温控度（temperature）为 0 保证输出的高一致性与低随机性。
         """
-        from langchain_openai import ChatOpenAI
-
-        return ChatOpenAI(
-            api_key=self.settings.llm_api_key,
-            base_url=self.settings.llm_api_base,
-            model=self.settings.llm_model,
+        return get_chat(
+            self.settings,
             temperature=0,
             max_tokens=max_tokens,
-            extra_body=self.settings.llm_extra_body,
         )
 
     def _llm_document_grade(self, question: str, doc: RetrievedDoc) -> RelevanceGrade:
@@ -909,13 +889,14 @@ def _fallback_grounded_answer(docs: list[RetrievedDoc]) -> str:
 
 def _explicit_product_tags(question: str) -> list[str]:
     """只从用户明确说出的型号/产品提取标签，避免用历史话题误过滤新问题。"""
+    aliases = load_product_aliases()
     lowered = question.lower()
     tags: list[str] = []
-    for alias, tag in sorted(
-        PRODUCT_TAG_ALIASES.items(), key=lambda item: len(item[0]), reverse=True
-    ):
-        if alias in lowered and tag not in tags:
-            tags.append(tag)
+    for keyword in sorted(aliases, key=len, reverse=True):
+        if keyword in lowered:
+            tag = aliases[keyword]
+            if tag not in tags:
+                tags.append(tag)
     return tags
 
 

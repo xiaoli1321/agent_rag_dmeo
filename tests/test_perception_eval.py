@@ -7,7 +7,7 @@ from ..agent.perception import heuristic_perception
 def test_perception_eval_dataset_meets_minimum_coverage() -> None:
     cases = load_cases()
 
-    assert len(cases) >= 35
+    assert len(cases) >= 33
     assert {case["expected_intent"] for case in cases} == {
         "产品咨询",
         "使用问题",

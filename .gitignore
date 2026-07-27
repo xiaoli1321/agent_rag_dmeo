@@ -1,3 +1,11 @@
 *.pyc
 .slim/deepwork/
 data/runs/
+
+# 废弃的 AI 辅助工具框架配置
+.agent/
+.agents/
+.codex/
+
+# 旧数据目录（已迁移到 data/）
+customer_agent_demo/
