@@ -390,6 +390,7 @@
           renderConversations();
         }
       }
+      return item;
     }
 
     function setState(payload, options = {}) {
@@ -661,33 +662,18 @@
       messages.scrollTop = messages.scrollHeight;
       
       try {
-        const response = await fetch("/api/chat", {
+        const response = await fetch("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message, thread_id: threadId }),
         });
-        const data = await response.json();
         
-        // Remove typing indicator
-        typingEl.remove();
-        
-        if (!response.ok) throw new Error(data.error || "请求失败");
-        const meta = [];
-        if (data.perception?.intent) meta.push(data.perception.intent);
-        if (data.perception?.emotion) meta.push(data.perception.emotion);
-        if (data.active_agent) meta.push(data.active_agent);
-        if (data.dialogue_status === "awaiting_clarification") meta.push("待澄清");
-        
-        addMessage("agent", data.answer || "", meta, {
-          suggestions: data.clarification?.options || [],
-        });
-        const session = activeSession();
-        if (session && session.title === "新对话") {
-          session.title = message.slice(0, 18);
+        if (response.ok) {
+          await handleStreamResponse(response, message, typingEl);
+        } else {
+          // Fall back to synchronous endpoint
+          await handleSyncResponse(message, typingEl);
         }
-        setState(data);
-        saveSessions();
-        renderConversations();
       } catch (error) {
         typingEl.remove();
         addMessage("agent", `请求失败：${error.message || error}`);
@@ -696,6 +682,119 @@
         input.focus();
       }
     }
+    
+    async function handleStreamResponse(response, message, typingEl) {
+      let fullAnswer = "";
+      let finalState = null;
+      let streamMsg = null;
+      let bubble = null;
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let done = false;
+      
+      while (!done) {
+        const readResult = await reader.read();
+        done = readResult.done;
+        buffer += decoder.decode(readResult.value || new Uint8Array(0), { stream: !done });
+        
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          const eventData = parseSSEEvent(part);
+          if (!eventData) continue;
+          
+          const { event, data: dataStr } = eventData;
+          let parsed;
+          try { parsed = JSON.parse(dataStr); } catch { continue; }
+          
+          if (event === "answer_token" && parsed.token) {
+            fullAnswer += parsed.token;
+            if (!streamMsg) {
+              typingEl.remove();
+              streamMsg = addMessage("agent", "", [], { persist: false });
+              bubble = streamMsg.querySelector(".bubble");
+            }
+            bubble.innerHTML = formatMarkdown(fullAnswer);
+            messages.scrollTop = messages.scrollHeight;
+          } else if (event === "state") {
+            finalState = parsed;
+          } else if (event === "error") {
+            throw new Error(parsed.error || "流式响应错误");
+          }
+        }
+      }
+      
+      if (finalState) {
+        if (streamMsg) streamMsg.remove();
+        const meta = [];
+        if (finalState.perception?.intent) meta.push(finalState.perception.intent);
+        if (finalState.perception?.emotion) meta.push(finalState.perception.emotion);
+        if (finalState.active_agent) meta.push(finalState.active_agent);
+        if (finalState.dialogue_status === "awaiting_clarification") meta.push("待澄清");
+        
+        addMessage("agent", finalState.answer || fullAnswer, meta, {
+          suggestions: finalState.clarification?.options || [],
+        });
+        
+        setState(finalState);
+        const session = activeSession();
+        if (session && session.title === "新对话") {
+          session.title = message.slice(0, 18);
+        }
+        saveSessions();
+        renderConversations();
+      }
+    }
+    
+    async function handleSyncResponse(message, typingEl) {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, thread_id: threadId }),
+      });
+      const data = await response.json();
+      
+      typingEl.remove();
+      
+      if (!response.ok) throw new Error(data.error || "请求失败");
+      const meta = [];
+      if (data.perception?.intent) meta.push(data.perception.intent);
+      if (data.perception?.emotion) meta.push(data.perception.emotion);
+      if (data.active_agent) meta.push(data.active_agent);
+      if (data.dialogue_status === "awaiting_clarification") meta.push("待澄清");
+      
+      addMessage("agent", data.answer || "", meta, {
+        suggestions: data.clarification?.options || [],
+      });
+      const session = activeSession();
+      if (session && session.title === "新对话") {
+        session.title = message.slice(0, 18);
+      }
+      setState(data);
+      saveSessions();
+      renderConversations();
+    }
+    
+    function parseSSEEvent(part) {
+      const lines = part.split("\n");
+      let event = "";
+      let data = "";
+      for (const line of lines) {
+        if (line.startsWith("event: ")) event = line.slice(7).trim();
+        else if (line.startsWith("data: ")) {
+          if (data) data += "\n";
+          data += line.slice(6);
+        }
+      }
+      if (!event && !data) return null;
+      return { event: event || "message", data };
+    }
+    
+
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();

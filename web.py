@@ -4,11 +4,17 @@ import argparse
 import json
 import logging
 import pathlib
+import warnings
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from socketserver import ThreadingMixIn
 from typing import Any
-from uuid import uuid4
+
+# Suppress LangSmith missing-API-key warning. Must be before any import that
+# transitively loads langsmith, because it fires on first client instantiation.
+warnings.filterwarnings(
+    "ignore", message="API key must be provided when using hosted LangSmith API"
+)
 
 from .agent.graph import CustomerAgent
 from .agent.models import PerceptionResult, RetrievedDoc
@@ -57,9 +63,14 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
-            if self.path != "/api/chat":
+            if self.path == "/api/chat":
+                self._handle_chat_sync()
+            elif self.path == "/api/chat/stream":
+                self._handle_chat_stream()
+            else:
                 self.send_error(HTTPStatus.NOT_FOUND)
-                return
+
+        def _handle_chat_sync(self) -> None:
             try:
                 payload = self._read_json()
                 message = str(payload.get("message") or "").strip()
@@ -77,11 +88,69 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
                         result, thread_id=thread_id, settings=agent.settings
                     )
                 )
-            except Exception as exc:  # pragma: no cover - request safety net
+            except Exception as exc:
                 LOGGER.exception("chat request failed")
                 self._send_json(
                     {"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR
                 )
+
+        def _handle_chat_stream(self) -> None:
+            try:
+                payload = self._read_json()
+                message = str(payload.get("message") or "").strip()
+                thread_id = str(
+                    payload.get("thread_id") or "web-default-thread"
+                ).strip()
+                if not message:
+                    self._send_sse_event("error", {"error": "message is required"})
+                    return
+
+                LOGGER.info(
+                    "stream_chat: message=%s thread=%s", message[:60], thread_id
+                )
+                self._send_sse_headers()
+
+                answer = ""
+                state = None
+
+                for event_type, data in agent.stream_chat(message, thread_id=thread_id):
+                    if event_type == "answer_token" and isinstance(data, str):
+                        answer += data
+                        self._send_sse_event("answer_token", {"token": data})
+                    elif event_type == "state" and isinstance(data, dict):
+                        state = data
+                    elif event_type == "error" and isinstance(data, str):
+                        self._send_sse_event("error", {"error": data})
+
+                self._send_sse_event(
+                    "state",
+                    _state_to_response(
+                        state, thread_id=thread_id, settings=agent.settings
+                    )
+                    if state
+                    else {},
+                )
+                self._send_sse_event("done", {})
+            except Exception as exc:
+                LOGGER.exception("stream chat failed")
+                try:
+                    self._send_sse_event("error", {"error": str(exc)})
+                    self._send_sse_event("done", {})
+                except Exception:
+                    pass
+
+        def _send_sse_headers(self) -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+        def _send_sse_event(self, event: str, data: dict[str, Any]) -> None:
+            line = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            self.wfile.write(line.encode("utf-8"))
+            self.wfile.flush()
 
         def log_message(self, format: str, *args: Any) -> None:
             LOGGER.info("%s - %s", self.address_string(), format % args)
@@ -106,6 +175,7 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(body)
 
@@ -171,6 +241,10 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
+
+    logging.getLogger("langsmith").setLevel(logging.WARNING)
+    logging.getLogger("langchain").setLevel(logging.WARNING)
+
     agent = CustomerAgent()
     handler = create_handler(agent)
     server = ThreadingHTTPServer((args.host, args.port), handler)

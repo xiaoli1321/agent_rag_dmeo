@@ -481,13 +481,12 @@
       display: flex;
       flex-direction: column;
       min-height: 0;
-      position: relative;
     }
 
     .messages-container {
       flex: 1;
       overflow-y: auto;
-      padding: 28px 28px 130px;
+      padding: 28px 28px 8px;
       display: flex;
       flex-direction: column;
       gap: 22px;
@@ -840,12 +839,9 @@
 
     /* Composer Container (Apple Capsule Floating Bar) */
     .composer-container {
-      padding: 16px 28px 24px;
-      background: linear-gradient(180deg, transparent 0%, var(--bg) 40%);
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
+      padding: 8px 28px 20px;
+      background: var(--bg);
+      flex-shrink: 0;
       z-index: 5;
     }
 
@@ -881,7 +877,7 @@
       font-size: 14.5px;
       line-height: 1.5;
       outline: none;
-      max-height: 130px;
+      max-height: 180px;
       min-height: 42px;
       padding: 4px 4px;
     }
@@ -898,8 +894,9 @@
       font-size: 11px;
       color: var(--text-muted);
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 8px;
+      gap: 6px 8px;
     }
 
     .shortcut-badge {
@@ -1393,7 +1390,7 @@
         box-shadow: 10px 0 30px rgba(0,0,0,0.15);
       }
       .messages-container {
-        padding: 16px 16px 130px;
+        padding: 16px 16px 8px;
       }
       .message {
         max-width: 95%;

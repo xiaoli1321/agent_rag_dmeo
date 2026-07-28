@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -80,11 +81,9 @@ class DemoSettings(BaseSettings):
 
     @model_validator(mode="after")
     def normalize(self) -> "DemoSettings":
-        import os
-
-        if self.langchain_tracing_v2:
+        if self.langchain_tracing_v2 and self.langchain_api_key:
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        if self.langchain_project:
+        if self.langchain_project and self.langchain_api_key:
             os.environ["LANGCHAIN_PROJECT"] = self.langchain_project
         if self.langchain_api_key:
             os.environ["LANGCHAIN_API_KEY"] = self.langchain_api_key

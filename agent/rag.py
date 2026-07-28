@@ -6,10 +6,7 @@ from contextvars import copy_context
 from dataclasses import dataclass
 import re
 from time import perf_counter
-from typing import Callable, TypeVar
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from typing import Callable, Generator, TypeVar
 
 from .chat_factory import get_chat, get_deepseek_strict_chat
 from .embeddings import get_embeddings
@@ -27,6 +24,9 @@ from .models import (
 from .product_aliases import load_product_aliases
 from .prompts import load_prompt
 from ..config import DemoSettings
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 # 仅匹配答案末尾的「引用区块」标题，避免误伤正文中的「参考/来源」字样。
@@ -711,12 +711,28 @@ class RagService:
         利用大语言模型（LLM）基于上下文（检索到的文档）生成事实性的回答。
         若模型未配置，则回退到直接把相关文本拼装成简版回答。
         """
+        answer, _ = self._generate_answer_raw(question, docs)
+        return answer
+
+    def _generate_answer_stream(
+        self, question: str, docs: list[RetrievedDoc]
+    ) -> Generator[str, None, str]:
+        """
+        流式版 _generate_answer —— 逐 token 产出，最后返回完整 answer。
+
+        Yields:
+            str: 每个 token 文本。
+
+        Returns:
+            str: 完整 answer（与 _generate_answer 相同格式）。
+        """
         if not self.settings.llm_configured:
-            return _fallback_grounded_answer(docs)
+            answer = _fallback_grounded_answer(docs)
+            yield answer
+            return answer
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        # 整理上下文文档列表，包含标题、源链接、分块编号和具体内容，输入至 LLM System Prompt 中
         context = "\n\n".join(
             f"[{index}] {doc.source_title}\nURL: {doc.source_url}\n"
             f"id: {doc.chunk_id or 'unknown'}\n{doc.chunk_text}"
@@ -729,8 +745,9 @@ class RagService:
                 self.settings.llm_max_tokens, self.settings.agent_rag_answer_max_tokens
             ),
         )
+        tokens: list[str] = []
         try:
-            message = chat.invoke(
+            for chunk in chat.stream(
                 [
                     SystemMessage(
                         content=load_prompt("rag_answer.md").format(
@@ -740,16 +757,82 @@ class RagService:
                     HumanMessage(content=question),
                 ],
                 config={"run_name": "RAGAnswerGeneratorLLM"},
+            ):
+                token = chunk.content
+                if isinstance(token, str) and token:
+                    tokens.append(token)
+                    yield token
+        except Exception:
+            logger.warning(
+                "generate_answer_stream: LLM call failed, grounding fallback"
             )
+            fallback = _fallback_grounded_answer(docs)
+            yield fallback
+            return fallback
+
+        raw = "".join(tokens)
+        if isinstance(raw, list):
+            answer = "\n".join(
+                item.get("text", "") for item in raw if isinstance(item, dict)
+            ).strip()
+        else:
+            answer = str(raw).strip()
+        return answer
+
+    def _generate_answer_raw(
+        self, question: str, docs: list[RetrievedDoc]
+    ) -> tuple[str, str]:
+        """
+        执行 LLM 回答生成并返回 (answer, raw_llm_output)。
+
+        LLM 调用使用流式 API（chat.stream），使上层 LangChain 回调可以实时捕获 token。
+        """
+        if not self.settings.llm_configured:
+            answer = _fallback_grounded_answer(docs)
+            return answer, answer
+
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        context = "\n\n".join(
+            f"[{index}] {doc.source_title}\nURL: {doc.source_url}\n"
+            f"id: {doc.chunk_id or 'unknown'}\n{doc.chunk_text}"
+            for index, doc in enumerate(docs, start=1)
+        )
+        chat = get_chat(
+            self.settings,
+            temperature=self.settings.llm_temperature,
+            max_tokens=min(
+                self.settings.llm_max_tokens, self.settings.agent_rag_answer_max_tokens
+            ),
+        )
+        tokens: list[str] = []
+        try:
+            for chunk in chat.stream(
+                [
+                    SystemMessage(
+                        content=load_prompt("rag_answer.md").format(
+                            context=context, question=question
+                        )
+                    ),
+                    HumanMessage(content=question),
+                ],
+                config={"run_name": "RAGAnswerGeneratorLLM"},
+            ):
+                token = chunk.content
+                if isinstance(token, str) and token:
+                    tokens.append(token)
         except Exception:
             logger.warning("generate_answer: LLM call failed, grounding fallback")
-            return _fallback_grounded_answer(docs)
-        content = message.content
-        if isinstance(content, list):
-            return "\n".join(
-                item.get("text", "") for item in content if isinstance(item, dict)
+            fallback = _fallback_grounded_answer(docs)
+            return fallback, fallback
+        raw = "".join(tokens)
+        if isinstance(raw, list):
+            answer = "\n".join(
+                item.get("text", "") for item in raw if isinstance(item, dict)
             ).strip()
-        return str(content).strip()
+        else:
+            answer = str(raw).strip()
+        return answer, answer
 
     def _structured_chat(self, *, max_tokens: int) -> object:
         """

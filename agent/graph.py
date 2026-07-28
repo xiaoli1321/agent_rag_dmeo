@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from queue import Queue
+from threading import Thread
 from time import perf_counter
-from typing import Callable
+from typing import Callable, Generator
 from uuid import uuid4
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.callbacks.base import BaseCallbackHandler
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
@@ -23,13 +23,27 @@ from .models import (
     PendingClarification,
     PerceptionResult,
     RagResult,
-    RetrievedDoc,
 )
 from .perception import PerceptionService, decide_perception
-from .product_aliases import load_product_aliases, lookup_product, lookup_aliases
-from .rag import RagService, RagSubgraphState, build_rag_subgraph
+from .product_aliases import load_product_aliases, lookup_product
+from .prompts import render_prompt
+from .rag import RagService, build_rag_subgraph
 from .run_logger import AgentRunLogger
 from ..config import DemoSettings, get_settings
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+class _StreamTokenHandler(BaseCallbackHandler):
+    """Captures LLM tokens during graph streaming for real-time typewriter effect."""
+
+    def __init__(self, event_queue: Queue) -> None:
+        self.q = event_queue
+
+    def on_llm_new_token(self, token: str, **kwargs) -> None:
+        if isinstance(token, str) and token:
+            self.q.put_nowait(("answer_token", token))
 
 
 # ── 类型别名 ──────────────────────────────────────────────
@@ -89,6 +103,68 @@ class CustomerAgent:
             latency_ms=latency_ms,
         )
         return result
+
+    def stream_chat(
+        self, user_message: str, *, thread_id: str | None = None
+    ) -> Generator[tuple[str, str | dict], None, None]:
+        """
+        流式对话入口。
+
+        在后台线程运行全图（graph.stream），通过 LangChain 回调捕获 LLM token
+        实现实时流式输出。Token 从 LLM 生成后立即推送至前端，无需等待全管线完成。
+
+        Yields:
+            (event_type, data) 二元组:
+            - ("answer_token", str) — LLM 实时生成的 token
+            - ("state", dict) — 最终完整状态
+            - ("error", str) — 异常信息
+        """
+        resolved_thread_id = thread_id or "demo-thread"
+        q: Queue[tuple[str, str | dict]] = Queue()
+        handler = _StreamTokenHandler(q)
+        started = perf_counter()
+
+        def _run() -> None:
+            try:
+                config: dict = {
+                    "configurable": {"thread_id": resolved_thread_id},
+                    "callbacks": [handler],
+                }
+                for event in self.graph.stream(
+                    {"messages": [HumanMessage(content=user_message)]},
+                    config,
+                    stream_mode="updates",
+                ):
+                    for node_name in event:
+                        logger.debug("stream_chat: node %s completed", node_name)
+
+                final = self.graph.get_state(config)
+                state: dict = dict(final.values) if final else {}
+
+                latency_ms = int((perf_counter() - started) * 1000)
+                self.run_logger.log_turn(
+                    thread_id=resolved_thread_id,
+                    user_message=user_message,
+                    state=state,  # type: ignore[arg-type]
+                    latency_ms=latency_ms,
+                )
+
+                q.put_nowait(("state", state))
+            except Exception as exc:
+                logger.exception("stream_chat: background thread failed")
+                q.put_nowait(("error", str(exc)))
+            finally:
+                q.put_nowait(("_done", None))
+
+        Thread(target=_run, daemon=True).start()
+
+        while True:
+            event_type, data = q.get()
+            if event_type == "_done":
+                break
+            yield (event_type, data)
+            if event_type == "error":
+                break
 
     def _build_graph(self) -> StateGraph:
         """
