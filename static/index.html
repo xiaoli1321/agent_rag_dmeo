@@ -64,41 +64,91 @@
             推荐示例
           </h3>
           <div class="samples">
-            <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                stroke-width="2">
-                <circle cx="12" cy="12" r="10"></circle>
-                <polygon points="12 8 8 12 12 16 12 8"></polygon>
-              </svg>
-              <span>GS3 测量的数据不准</span>
-            </button>
-            <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                stroke-width="2">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-              </svg>
-              <span>GS3 传感器连不上手机蓝牙，怎么排查？</span>
-            </button>
-            <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                stroke-width="2">
-                <rect x="7" y="6" width="10" height="12" rx="3"></rect>
-                <path d="M10 6V3h4v3M10 18v3h4v-3"></path>
-                <path d="M10 10h4M10 13h2"></path>
-              </svg>
-              <span>介绍一下硅基手表</span>
-            </button>
-            <button class="sample-btn" type="button">
-              <svg class="sample-btn-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-                stroke-width="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
-                </path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-              </svg>
-              <span>传感器刚贴上就断连了，我要投诉，转人工！</span>
-            </button>
+            <div class="sample-group">
+              <div class="sample-group-header">
+                <span class="sample-group-title">意图识别多轮对话</span>
+                <span class="sample-group-note">同一回话同时更换产品和故障问题</span>
+              </div>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>GS3蓝牙总是连接不上</span>
+              </button>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>服了，还有为什么我这个GS1的设备总是跟我指尖血测出来的数据不一致</span>
+              </button>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>给我介绍一下硅基手表</span>
+              </button>
+            </div>
+
+            <div class="sample-group">
+              <div class="sample-group-header">
+                <span class="sample-group-title">意图是被多轮对话</span>
+                <span class="sample-group-note">统一会话的产品进行代指是否能正确识别</span>
+              </div>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>GS3蓝牙连接不上</span>
+              </button>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>现在他的数据也不准了</span>
+              </button>
+            </div>
+
+            <div class="sample-group">
+              <div class="sample-group-header">
+                <span class="sample-group-title">询问无关问题</span>
+              </div>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>长沙天气今天怎么样？</span>
+              </button>
+            </div>
+
+            <div class="sample-group">
+              <div class="sample-group-header">
+                <span class="sample-group-title">带情绪的产品咨询</span>
+              </div>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>真的服了你们这些烂设备，总是蓝牙断联啊</span>
+              </button>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>GS3</span>
+              </button>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>为什么设备总是出问题，不想用这个设备了</span>
+              </button>
+            </div>
+
+            <div class="sample-group">
+              <div class="sample-group-header">
+                <span class="sample-group-title">转人工</span>
+              </div>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>真的服了，产品很难用，给我转人工</span>
+              </button>
+            </div>
+
+            <div class="sample-group">
+              <div class="sample-group-header">
+                <span class="sample-group-title">产品咨询确定槽位</span>
+              </div>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>蓝牙连接不上（正常来说就是缺少槽位）</span>
+              </button>
+              <button class="sample-btn" type="button">
+                <svg class="sample-btn-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="12 8 8 12 12 16 12 8"/></svg>
+                <span>GS3</span>
+              </button>
+            </div>
           </div>
         </section>
       </div>
