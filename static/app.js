@@ -1,6 +1,3 @@
-    const ACTIVE_THREAD_STORAGE_KEY = "customer_agent_demo_thread_id";
-    const SESSIONS_STORAGE_KEY = "customer_agent_demo_sessions";
-
     // Enhanced markdown formatting helper with copy-code snippet support
     function formatMarkdown(text) {
       if (!text) return "";
@@ -113,33 +110,27 @@
       return `web-${random}`;
     }
 
-    function createSession() {
-      return {
-        threadId: createThreadId(),
-        title: "新对话",
-        messages: [],
-        state: null,
-        createdAt: Date.now(),
-      };
-    }
-
-    function loadSessions() {
+    async function fetchSessions() {
       try {
-        const parsed = JSON.parse(localStorage.getItem(SESSIONS_STORAGE_KEY) || "[]");
-        if (Array.isArray(parsed) && parsed.length) return parsed;
-      } catch (_) {}
-      const first = createSession();
-      localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify([first]));
-      localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, first.threadId);
-      return [first];
+        const resp = await fetch("/api/conversations");
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return data.sessions || [];
+      } catch { return []; }
     }
 
-    let sessions = loadSessions();
-    let threadId = localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY) || sessions[0].threadId;
-    if (!sessions.some((session) => session.threadId === threadId)) {
-      threadId = sessions[0].threadId;
-      localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, threadId);
+    async function fetchSessionMessages(threadId) {
+      try {
+        const resp = await fetch(`/api/conversations/${encodeURIComponent(threadId)}`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.messages || [];
+      } catch { return null; }
     }
+
+    let sessions = [];
+    let threadId = localStorage.getItem("customer_agent_demo_thread_id") || "";
+    let userInitiatedNewThread = false;
 
     const messages = document.querySelector("#messages");
     const form = document.querySelector("#form");
@@ -224,12 +215,7 @@
     }
 
     function activeSession() {
-      return sessions.find((session) => session.threadId === threadId);
-    }
-
-    function saveSessions() {
-      localStorage.setItem(SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
-      localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY, threadId);
+      return sessions.find((s) => s.thread_id === threadId);
     }
 
     function clearEmpty() {
@@ -253,27 +239,26 @@
       defense.innerHTML = '<div class="empty-state-mini">无链路追踪数据</div>';
     }
 
-    function deleteSession(idToDelete) {
+    async function deleteSession(idToDelete) {
       if (sessions.length <= 1) {
         alert("请保留至少一个会话。");
         return;
       }
-      const index = sessions.findIndex(s => s.threadId === idToDelete);
-      if (index === -1) return;
-      
-      sessions.splice(index, 1);
+      const resp = await fetch(`/api/conversations/${encodeURIComponent(idToDelete)}`, { method: "DELETE" });
+      if (!resp.ok) return;
+      sessions = sessions.filter(s => s.thread_id !== idToDelete);
       if (threadId === idToDelete) {
-        threadId = sessions[0].threadId;
+        threadId = sessions[0].thread_id;
+        localStorage.setItem("customer_agent_demo_thread_id", threadId);
       }
-      saveSessions();
-      renderSession();
+      await renderSession();
     }
 
     function renderConversations() {
       conversations.innerHTML = "";
       for (const session of sessions) {
         const item = document.createElement("div");
-        item.className = `conversation-item${session.threadId === threadId ? " active" : ""}`;
+        item.className = `conversation-item${session.thread_id === threadId ? " active" : ""}`;
         
         const content = document.createElement("div");
         content.className = "conversation-content";
@@ -284,7 +269,7 @@
         
         const id = document.createElement("small");
         id.className = "conversation-id";
-        id.textContent = session.threadId;
+        id.textContent = session.thread_id;
         
         content.appendChild(title);
         content.appendChild(id);
@@ -299,19 +284,19 @@
         
         deleteBtn.addEventListener("click", (e) => {
           e.stopPropagation();
-          deleteSession(session.threadId);
+          deleteSession(session.thread_id);
         });
         
         item.appendChild(deleteBtn);
-        item.addEventListener("click", () => switchSession(session.threadId));
+        item.addEventListener("click", () => switchSession(session.thread_id));
         conversations.appendChild(item);
       }
     }
 
-    function renderMessages() {
+    async function renderMessages() {
       const session = activeSession();
       messages.innerHTML = "";
-      if (!session || !session.messages.length) {
+      if (!session) {
         messages.innerHTML = `
           <div class="empty-state">
             <div class="hero-badge">
@@ -324,30 +309,47 @@
         `;
         return;
       }
-      for (const message of session.messages) {
-        addMessage(message.role, message.text, message.meta || [], {
-          persist: false,
-          suggestions: message.suggestions || [],
-        });
+      const msgs = await fetchSessionMessages(session.thread_id);
+      if (!msgs || !msgs.length) {
+        messages.innerHTML = `
+          <div class="empty-state">
+            <div class="hero-badge">
+              <span class="pulse-dot"></span>
+              <span>LangGraph Multi-Agent 架构</span>
+            </div>
+            <h2 class="empty-state-title">CGM 智能血糖客服</h2>
+            <p class="empty-state-subtitle">内置 Self-RAG/CRAG 双重防护网与 Multi-Agent 分流协同架构，保障医疗级客服的高准确度与极低幻觉率。</p>
+          </div>
+        `;
+        return;
       }
-    }
-
-    function renderSession() {
-      renderThreadId();
-      renderConversations();
-      renderMessages();
-      const session = activeSession();
-      if (session?.state) {
-        setState(session.state, { persist: false });
+      // Find last agent message with state for inspector panel
+      let lastState = null;
+      for (const msg of msgs) {
+        addMessage(msg.role, msg.text, msg.meta || [], {
+          suggestions: msg.suggestions || [],
+        });
+        if (msg.role === "agent" && msg.state) {
+          lastState = msg.state;
+        }
+      }
+      if (lastState) {
+        setState(lastState);
       } else {
         resetStatePanel();
       }
     }
 
-    function switchSession(nextThreadId) {
+    async function renderSession() {
+      renderThreadId();
+      renderConversations();
+      await renderMessages();
+    }
+
+    async function switchSession(nextThreadId) {
       threadId = nextThreadId;
-      saveSessions();
-      renderSession();
+      localStorage.setItem("customer_agent_demo_thread_id", threadId);
+      await renderSession();
       input.focus();
     }
 
@@ -436,19 +438,10 @@
       item.appendChild(body);
       messages.appendChild(item);
       messages.scrollTop = messages.scrollHeight;
-      
-      if (options.persist !== false) {
-        const session = activeSession();
-        if (session) {
-          session.messages.push({ role, text, meta, suggestions });
-          saveSessions();
-          renderConversations();
-        }
-      }
       return item;
     }
 
-    function setState(payload, options = {}) {
+    function setState(payload) {
       const perception = payload.perception || {};
       
       const intentBadge = document.querySelector("#state-intent");
@@ -684,14 +677,6 @@
           defense.appendChild(tStep);
         }
       }
-
-      if (options.persist !== false) {
-        const session = activeSession();
-        if (session) {
-          session.state = payload;
-          saveSessions();
-        }
-      }
     }
 
     async function sendMessage(text) {
@@ -726,8 +711,8 @@
         if (response.ok) {
           await handleStreamResponse(response, message, typingEl);
         } else {
-          // Fall back to synchronous endpoint
-          await handleSyncResponse(message, typingEl);
+          typingEl.remove();
+          addMessage("agent", `请求失败：HTTP ${response.status}`);
         }
       } catch (error) {
         typingEl.remove();
@@ -770,7 +755,7 @@
             fullAnswer += parsed.token;
             if (!streamMsg) {
               typingEl.remove();
-              streamMsg = addMessage("agent", "", [], { persist: false });
+              streamMsg = addMessage("agent", "", []);
               bubble = streamMsg.querySelector(".bubble");
             }
             bubble.innerHTML = formatMarkdown(fullAnswer);
@@ -785,6 +770,11 @@
       
       if (finalState) {
         if (streamMsg) streamMsg.remove();
+        
+        // Update threadId from server response (catches default-thread mapping)
+        threadId = finalState.thread_id || threadId;
+        localStorage.setItem("customer_agent_demo_thread_id", threadId);
+        
         const meta = [];
         if (finalState.perception?.intent) meta.push(finalState.perception.intent);
         if (finalState.perception?.emotion) meta.push(finalState.perception.emotion);
@@ -796,42 +786,14 @@
         });
         
         setState(finalState);
-        const session = activeSession();
-        if (session && session.title === "新对话") {
-          session.title = message.slice(0, 18);
+        
+        // Refresh session list, guard against API failure clearing sidebar
+        const freshSessions = await fetchSessions();
+        if (freshSessions.length > 0 || !sessions.length) {
+          sessions = freshSessions;
         }
-        saveSessions();
         renderConversations();
       }
-    }
-    
-    async function handleSyncResponse(message, typingEl) {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, thread_id: threadId }),
-      });
-      const data = await response.json();
-      
-      typingEl.remove();
-      
-      if (!response.ok) throw new Error(data.error || "请求失败");
-      const meta = [];
-      if (data.perception?.intent) meta.push(data.perception.intent);
-      if (data.perception?.emotion) meta.push(data.perception.emotion);
-      if (data.active_agent) meta.push(data.active_agent);
-      if (data.dialogue_status === "awaiting_clarification") meta.push("待澄清");
-      
-      addMessage("agent", data.answer || "", meta, {
-        suggestions: data.clarification?.options || [],
-      });
-      const session = activeSession();
-      if (session && session.title === "新对话") {
-        session.title = message.slice(0, 18);
-      }
-      setState(data);
-      saveSessions();
-      renderConversations();
     }
     
     function parseSSEEvent(part) {
@@ -878,15 +840,32 @@
       }
     });
 
-    newThread.addEventListener("click", () => {
-      const session = createSession();
-      sessions = [session, ...sessions];
-      threadId = session.threadId;
-      saveSessions();
-      renderSession();
+    newThread.addEventListener("click", async () => {
+      userInitiatedNewThread = true;
+      threadId = createThreadId();
+      localStorage.setItem("customer_agent_demo_thread_id", threadId);
+      await renderSession();
       input.focus();
     });
-    renderSession();
+
+    async function initApp() {
+      sessions = await fetchSessions();
+      // Don't overwrite threadId if user just clicked "new thread" before initApp finished
+      if (!userInitiatedNewThread) {
+        if (!threadId && sessions.length > 0) {
+          threadId = sessions[0].thread_id;
+        }
+        if (threadId && !sessions.some(s => s.thread_id === threadId)) {
+          threadId = sessions.length > 0 ? sessions[0].thread_id : "";
+        }
+        if (threadId) {
+          localStorage.setItem("customer_agent_demo_thread_id", threadId);
+        }
+      }
+      await renderSession();
+    }
+
+    initApp();
 
     document.querySelector("#modal-close-btn").addEventListener("click", () => {
       document.querySelector("#doc-modal").style.display = "none";

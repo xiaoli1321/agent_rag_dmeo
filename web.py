@@ -16,9 +16,10 @@ warnings.filterwarnings(
     "ignore", message="API key must be provided when using hosted LangSmith API"
 )
 
+from .agent.conversation_store import ConversationStore
 from .agent.graph import CustomerAgent
 from .agent.models import PerceptionResult, RetrievedDoc
-from .config import DemoSettings, get_settings
+from .config import DEMO_ROOT, DemoSettings, get_settings
 
 LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ HTML_PAGE = _read_index_html()
 
 
 def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
+    store = ConversationStore(DEMO_ROOT / "data" / "conversations")
+
     class DemoRequestHandler(BaseHTTPRequestHandler):
         server_version = "CustomerAgentDemo/0.1"
 
@@ -44,6 +47,20 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
                 return
             if self.path == "/api/health":
                 self._send_json({"ok": True})
+                return
+            if self.path == "/api/conversations":
+                self._send_json({"sessions": store.list_sessions()})
+                return
+            if self.path.startswith("/api/conversations/"):
+                thread_id = self.path[len("/api/conversations/") :]
+                if not thread_id:
+                    self.send_error(HTTPStatus.BAD_REQUEST)
+                    return
+                messages = store.get_session(thread_id)
+                if messages is None:
+                    self.send_error(HTTPStatus.NOT_FOUND)
+                    return
+                self._send_json({"thread_id": thread_id, "messages": messages})
                 return
             # 静态文件
             static_path = STATIC_DIR / self.path.lstrip("/")
@@ -63,36 +80,21 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
-            if self.path == "/api/chat":
-                self._handle_chat_sync()
-            elif self.path == "/api/chat/stream":
+            if self.path == "/api/chat/stream":
                 self._handle_chat_stream()
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
 
-        def _handle_chat_sync(self) -> None:
-            try:
-                payload = self._read_json()
-                message = str(payload.get("message") or "").strip()
-                thread_id = str(
-                    payload.get("thread_id") or "web-default-thread"
-                ).strip()
-                if not message:
-                    self._send_json(
-                        {"error": "message is required"}, status=HTTPStatus.BAD_REQUEST
-                    )
+        def do_DELETE(self) -> None:
+            if self.path.startswith("/api/conversations/"):
+                thread_id = self.path[len("/api/conversations/") :]
+                if not thread_id:
+                    self.send_error(HTTPStatus.BAD_REQUEST)
                     return
-                result = agent.invoke(message, thread_id=thread_id)
-                self._send_json(
-                    _state_to_response(
-                        result, thread_id=thread_id, settings=agent.settings
-                    )
-                )
-            except Exception as exc:
-                LOGGER.exception("chat request failed")
-                self._send_json(
-                    {"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR
-                )
+                store.delete_session(thread_id)
+                self._send_json({"ok": True})
+            else:
+                self.send_error(HTTPStatus.NOT_FOUND)
 
         def _handle_chat_stream(self) -> None:
             try:
@@ -122,15 +124,30 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
                     elif event_type == "error" and isinstance(data, str):
                         self._send_sse_event("error", {"error": data})
 
-                self._send_sse_event(
-                    "state",
+                response = (
                     _state_to_response(
                         state, thread_id=thread_id, settings=agent.settings
                     )
                     if state
-                    else {},
+                    else {}
                 )
+                self._send_sse_event("state", response)
                 self._send_sse_event("done", {})
+
+                # Persist conversation after streaming is done
+                if state:
+                    try:
+                        meta, suggestions = _extract_meta_and_suggestions(response)
+                        store.append_turn(
+                            thread_id,
+                            message,
+                            answer,
+                            response,
+                            meta=meta,
+                            suggestions=suggestions,
+                        )
+                    except Exception:
+                        LOGGER.exception("Failed to persist conversation")
             except Exception as exc:
                 LOGGER.exception("stream chat failed")
                 try:
@@ -228,6 +245,25 @@ def _model_to_dict(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump()
     return value
+
+
+def _extract_meta_and_suggestions(
+    response: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Replicate frontend meta derivation so JSONL has the same fields."""
+    meta: list[str] = []
+    perception = response.get("perception") or {}
+    if perception.get("intent"):
+        meta.append(perception["intent"])
+    if perception.get("emotion"):
+        meta.append(perception["emotion"])
+    if response.get("active_agent"):
+        meta.append(response["active_agent"])
+    if response.get("dialogue_status") == "awaiting_clarification":
+        meta.append("待澄清")
+    clarification = response.get("clarification") or {}
+    suggestions: list[str] = clarification.get("options") or []
+    return meta, suggestions
 
 
 def main() -> None:

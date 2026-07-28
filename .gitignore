@@ -1,6 +1,7 @@
 *.pyc
 .slim/deepwork/
 data/runs/
+data/conversations/
 
 # 废弃的 AI 辅助工具框架配置
 .agent/
