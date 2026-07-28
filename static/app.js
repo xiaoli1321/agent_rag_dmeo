@@ -45,7 +45,12 @@
         processedLines.push('</ul>');
       }
       
-      return processedLines.join('\\n').replace(/\\n/g, '<br>');
+      html = processedLines.join('\\n');
+
+      // URLs → clickable links (after markdown transforms, before <br>)
+      html = html.replace(/(https?:\/\/[^\s<"]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+
+      return html.replace(/\\n/g, '<br>');
     }
 
     function createThreadId() {

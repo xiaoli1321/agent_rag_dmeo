@@ -415,10 +415,7 @@ def test_empty_llm_answer_uses_evidence_fallback_in_pipeline() -> None:
             return [_doc("蓝牙连不上时，先打开手机蓝牙并重启健康 App。", score=0.9)]
 
         def _generate_answer(self, question: str, docs: list[RetrievedDoc]) -> str:
-            return (
-                "引用：\n"
-                "[1] Dexcom G7 FAQ - https://example.com"
-            )
+            return "引用：\n[1] Dexcom G7 FAQ - https://example.com"
 
         def check_hallucination(self, answer: str, docs: list[RetrievedDoc]):
             from ..agent.models import HallucinationDecision

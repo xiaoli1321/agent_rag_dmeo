@@ -25,10 +25,10 @@ def classify_message_to_json(message: str, temperature: float = 0.0) -> str:
     """输入用户消息，输出格式化的结构化 JSON 字符串"""
     settings = get_settings()
     service = PerceptionService(settings=settings, temperature=temperature)
-    
+
     # 调用感知层分类（with_structured_output，temperature=0）
     draft, source = service.classify_draft(message)
-    
+
     # 提取核心需求要求的 JSON 结构：意图 + 情绪 + 置信度 + 其他结构化字段
     output_dict = {
         "input_message": message,
@@ -41,7 +41,7 @@ def classify_message_to_json(message: str, temperature: float = 0.0) -> str:
         "evidence": draft.evidence,
         "classifier_source": source,
     }
-    
+
     return json.dumps(output_dict, ensure_ascii=False, indent=2)
 
 
@@ -52,7 +52,7 @@ def main():
         "请问 Dexcom G7 支持 waterproof 防水吗？",
         "你好，今天天气真不错。",
     ]
-    
+
     print("================ 感知层 结构化 JSON 输出演示 ================\n")
     for msg in test_messages:
         print(f"用户消息: {msg}")

@@ -800,6 +800,14 @@
       font-weight: 700;
       color: var(--text);
     }
+    .bubble a {
+      color: var(--accent-solid);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .bubble a:hover {
+      opacity: 0.8;
+    }
     .inline-code {
       font-family: var(--font-mono);
       background: rgba(0,0,0,0.06);

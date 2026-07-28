@@ -110,7 +110,9 @@ def test_custom_empathy_temperature_setting() -> None:
     assert settings.agent_empathy_temperature == 1.0
 
 
-def test_non_handoff_empathy_fallback_does_not_proactively_offer_human_support() -> None:
+def test_non_handoff_empathy_fallback_does_not_proactively_offer_human_support() -> (
+    None
+):
     from ..agent.perception import heuristic_empathy
 
     answer = heuristic_empathy("蓝牙连接不上", intent="使用问题")
@@ -150,7 +152,9 @@ def test_rag_structured_prompts_render_without_error() -> None:
     }
 
     assert "GS3 蓝牙连接不上" in load_prompt("rag_rewrite.md").format(**values)
-    assert "GS3 蓝牙连接处理步骤" in load_prompt("rag_document_grader.md").format(**values)
+    assert "GS3 蓝牙连接处理步骤" in load_prompt("rag_document_grader.md").format(
+        **values
+    )
     assert "请重启手机后再试" in load_prompt("rag_grounding_grader.md").format(**values)
 
 
@@ -305,8 +309,12 @@ def test_calm_message_resets_angry_count() -> None:
         nonlocal calls
         calls += 1
         if calls == 1:
-            return _perception(intent="使用问题", emotion="愤怒", handoff_requested=False)(msg, history)
-        return _perception(intent="使用问题", emotion="平静", handoff_requested=False)(msg, history)
+            return _perception(
+                intent="使用问题", emotion="愤怒", handoff_requested=False
+            )(msg, history)
+        return _perception(intent="使用问题", emotion="平静", handoff_requested=False)(
+            msg, history
+        )
 
     agent = CustomerAgent(
         perception_fn=_dynamic_perception,
@@ -663,7 +671,9 @@ def test_new_request_refreshes_current_issue_instead_of_stuck_old_issue() -> Non
     assert second["current_issue"] == "佩戴"
 
 
-def test_troubleshooting_feedback_inherits_current_issue_without_reasking_missing_slot() -> None:
+def test_troubleshooting_feedback_inherits_current_issue_without_reasking_missing_slot() -> (
+    None
+):
     agent = CustomerAgent(settings=_offline_settings(), rag_fn=_grounded_rag)
     thread_id = "test-feedback-no-reask"
 

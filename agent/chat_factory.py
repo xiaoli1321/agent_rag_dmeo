@@ -37,9 +37,7 @@ def get_chat(
         else settings.llm_extra_body
     )
     extra_body_str: str = (
-        json.dumps(extra_body, sort_keys=True, ensure_ascii=False)
-        if extra_body
-        else ""
+        json.dumps(extra_body, sort_keys=True, ensure_ascii=False) if extra_body else ""
     )
     return _cached_chat(
         api_key=settings.llm_api_key or "",

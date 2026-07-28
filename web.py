@@ -32,7 +32,9 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
 
         def do_GET(self) -> None:
             if self.path in {"/", "/index.html"}:
-                self._send_text(_read_index_html(), content_type="text/html; charset=utf-8")
+                self._send_text(
+                    _read_index_html(), content_type="text/html; charset=utf-8"
+                )
                 return
             if self.path == "/api/health":
                 self._send_json({"ok": True})

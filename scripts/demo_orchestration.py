@@ -26,38 +26,43 @@ from customer_agent_demo.config import get_settings
 def main():
     settings = get_settings()
     agent = CustomerAgent(settings=settings)
-    
+
     thread_id = "demo_session_001"
-    
+
     print("================ 编排层 (LangGraph) 多轮动态路由演示 ================\n")
     print(f"会话 ID (thread_id): {thread_id}\n")
-    
+
     turns = [
         ("第一轮：咨询具体产品故障", "GS3 蓝牙连不上怎么办？"),
         ("第二轮：利用 Checkpointer 进行指代继承", "它支持防水吗？"),
-        ("第三轮：触发愤怒安抚与转人工路由", "你们服务太差了，搞了半天还是不行，马上给我退款转人工！"),
+        (
+            "第三轮：触发愤怒安抚与转人工路由",
+            "你们服务太差了，搞了半天还是不行，马上给我退款转人工！",
+        ),
     ]
-    
+
     for label, message in turns:
         print(f"👉 [{label}]")
-        print(f"用户输入: \"{message}\"")
-        
+        print(f'用户输入: "{message}"')
+
         # 执行图编排，传入 thread_id 保持会话 Memory Checkpoint
         state = agent.invoke(message, thread_id=thread_id)
-        
+
         perception = state.get("perception")
         active_agent = state.get("active_agent")
         current_topic = state.get("current_topic")
         answer = state.get("answer", "")
-        
+
         print("\n=== 编排层内部状态 (AgentState) 判定说明 ===")
         print(f"- 命中感知意图: {perception.intent if perception else '未知'}")
         print(f"- 情绪感知标签: {perception.emotion if perception else '未知'}")
         print(f"- 置信度: {perception.confidence if perception else '未知'}")
         print(f"- 跨轮继承锁定主题 (current_topic): {current_topic or '未锁定'}")
         print(f"- 激活的目标代理节点 (active_agent): {active_agent}")
-        print(f"- 是否触发转人工 (handoff_requested): {perception.handoff_requested if perception else False}")
-        
+        print(
+            f"- 是否触发转人工 (handoff_requested): {perception.handoff_requested if perception else False}"
+        )
+
         print("\n=== 系统最终输出给用户的回答 ===")
         print(answer)
         print("=" * 70 + "\n")

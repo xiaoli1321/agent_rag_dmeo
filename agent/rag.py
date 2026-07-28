@@ -210,9 +210,9 @@ class RagService:
         if _looks_like_insufficient_answer(answer):
             debug_trace["generation_warning"] = "llm_refused_after_grounded_retrieval"
         if not raw_answer.strip() or answer == _fallback_grounded_answer(docs):
-            debug_trace["generation_warning"] = debug_trace.get(
-                "generation_warning"
-            ) or "empty_answer_body_fallback"
+            debug_trace["generation_warning"] = (
+                debug_trace.get("generation_warning") or "empty_answer_body_fallback"
+            )
 
         # 在生成答案末尾附加上格式化后的引用文档列表
         answer = f"{answer.rstrip()}\n\n{format_references(docs)}"
@@ -357,6 +357,7 @@ class RagService:
         try:
             dense_docs = self._search_dense(question, topic_hint=topic_hint, top_k=k)
         except Exception:
+            logger.warning("search_hybrid: dense search failed, sparse-only")
             dense_docs = []
         # 获取稀疏检索结果（本地倒排索引）
         sparse_hits = LocalSparseRetriever().search(
@@ -385,7 +386,9 @@ class RagService:
             list[DocumentGrade]: 各个文档的评估打分结果。
         """
         if len(docs) < 2 or self.settings.agent_llm_grader_max_concurrency == 1:
-            return [self._grade_document(question, doc, attempt=attempt) for doc in docs]
+            return [
+                self._grade_document(question, doc, attempt=attempt) for doc in docs
+            ]
 
         # New worker threads do not inherit contextvars by default. Copy the
         # current tracing context so LangSmith keeps these calls nested under
@@ -436,7 +439,7 @@ class RagService:
                     attempt=attempt,
                 )
             except Exception:
-                pass
+                logger.warning("grade_document: LLM grader failed, heuristic fallback")
 
         # 2. 启发式双重保险：计算关键词覆盖度和重合度
         overlap, coverage = _keyword_overlap_coverage(question, doc.chunk_text)
@@ -502,7 +505,9 @@ class RagService:
                     status="grounded", reason=grade.reason, grader="llm"
                 )
             except Exception:
-                pass
+                logger.warning(
+                    "check_hallucination: LLM grader failed, heuristic fallback"
+                )
 
         # 3. 启发式数值硬过滤：数字在事实陈述中极其关键，若回答中含有检索文本中从未出现过的数字，则判定为幻觉风险
         unsupported_numbers = [
@@ -568,6 +573,7 @@ class RagService:
                 )
             )
         except Exception:
+            logger.warning("rewrite_question: LLM rewrite failed, using original")
             return QueryRewrite(
                 rewritten_question=stripped,
                 reason="rewrite_fallback_due_to_llm_error",
@@ -736,6 +742,7 @@ class RagService:
                 config={"run_name": "RAGAnswerGeneratorLLM"},
             )
         except Exception:
+            logger.warning("generate_answer: LLM call failed, grounding fallback")
             return _fallback_grounded_answer(docs)
         content = message.content
         if isinstance(content, list):
@@ -797,7 +804,10 @@ def format_references(docs: list[RetrievedDoc]) -> str:
     """
     lines = ["引用："]
     for index, doc in enumerate(dedupe_retrieved_sources(docs), start=1):
-        lines.append(f"[{index}] {doc.source_title} - {doc.source_url}")
+        if doc.source_url:
+            lines.append(f"[{index}] {doc.source_title} - {doc.source_url}")
+        else:
+            lines.append(f"[{index}] {doc.source_title}")
     return "\n".join(lines)
 
 
@@ -1188,9 +1198,14 @@ def build_rag_subgraph(settings: DemoSettings, rag_service: RagService):
         rq = state.get("rewritten_question", "")
         if not rq:
             rq = rag_service._rewrite_question(q, topic_hint=th).rewritten_question
-        candidates = rag_service._search_hybrid(
-            rq, topic_hint=th, top_k=settings.agent_top_k * 2
-        )
+        if settings.agent_retrieval_strategy == "hybrid":
+            candidates = rag_service._search_hybrid(
+                rq, topic_hint=th, top_k=settings.agent_top_k * 2
+            )
+        else:
+            candidates = rag_service._search_dense(
+                rq, topic_hint=th, top_k=settings.agent_top_k * 2
+            )
         return {"rewritten_question": rq, "candidates": candidates}
 
     def grade_docs(state: RagSubgraphState) -> dict:

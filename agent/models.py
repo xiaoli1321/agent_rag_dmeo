@@ -118,7 +118,9 @@ class IntentDraft(BaseModel):
         entities = normalized.get("entities")
         if isinstance(entities, dict):
             if "issue" not in entities:
-                entities["issue"] = entities.get("issue_type") or entities.get("problem")
+                entities["issue"] = entities.get("issue_type") or entities.get(
+                    "problem"
+                )
             prod = entities.get("product")
             if isinstance(prod, str) and prod:
                 prod_mapped = {

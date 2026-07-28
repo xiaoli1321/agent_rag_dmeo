@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
@@ -25,6 +26,8 @@ from .intent_catalog import (
 from .product_aliases import lookup_product
 from .prompts import load_prompt, render_prompt
 from ..config import DemoSettings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -109,6 +112,7 @@ class PerceptionService:
                 else IntentDraft.model_validate(result)
             ), "llm"
         except Exception:
+            logger.warning("classify_draft: LLM call failed, heuristic fallback")
             return heuristic_draft(message, current_topic=current_topic), "fallback"
 
     def generate_empathy(
@@ -151,6 +155,7 @@ class PerceptionService:
             )
             return str(res.content).strip()
         except Exception:
+            logger.warning("generate_empathy: LLM call failed, heuristic fallback")
             return heuristic_empathy(
                 message, intent=intent, handoff_requested=handoff_requested, issue=issue
             )
@@ -262,7 +267,9 @@ def decide_perception(
         missing = pending_clarification.missing_slots[0]
         if missing == "problem_detail" and not merged.issue:
             clean_msg = message.strip()
-            if not any(w in clean_msg for w in ("不知道", "不清楚", "都不是", "不确定")):
+            if not any(
+                w in clean_msg for w in ("不知道", "不清楚", "都不是", "不确定")
+            ):
                 merged.issue = clean_msg
         resolved = _is_slot_resolved(missing, merged)
         if resolved:
@@ -287,7 +294,9 @@ def decide_perception(
 
     missing = _first_missing_slot(definition, entities)
     if missing and not (draft.is_general_query and missing == "target_product"):
-        return _clarification_decision(draft, entities, turn_relation, classifier_source, missing)
+        return _clarification_decision(
+            draft, entities, turn_relation, classifier_source, missing
+        )
     return _decision_from_draft(
         draft,
         entities,
@@ -348,7 +357,9 @@ def _clarification_decision(
 def _first_missing_slot(definition: object, entities: PerceptionEntities) -> str | None:
     slots_catalog = load_slot_catalog()
     for slot in getattr(definition, "clarification_order", ()):
-        if slot in getattr(definition, "required_slots", ()) and not _is_slot_resolved(slot, entities):
+        if slot in getattr(definition, "required_slots", ()) and not _is_slot_resolved(
+            slot, entities
+        ):
             return slot
     for slot in getattr(definition, "required_slots", ()):
         if not _is_slot_resolved(slot, entities):
@@ -408,7 +419,11 @@ def heuristic_perception(
     text = stripped.lower()
 
     handoff = any(word in text for word in handoff_words)
-    emotion = "愤怒" if any(word in text for word in emotion_signals.get("愤怒", ())) else "平静"
+    emotion = (
+        "愤怒"
+        if any(word in text for word in emotion_signals.get("愤怒", ()))
+        else "平静"
+    )
     if emotion == "平静" and any(
         word in text for word in emotion_signals.get("不满", ())
     ):
@@ -489,8 +504,13 @@ def heuristic_perception(
             entities=PerceptionEntities(issue=issue, requested_action=requested_action),
         )
 
-    is_general_query = intent == "产品咨询" and not product and any(
-        kw in stripped for kw in ("是什么", "公司有哪些", "有哪些产品", "公司卖什么", "区别")
+    is_general_query = (
+        intent == "产品咨询"
+        and not product
+        and any(
+            kw in stripped
+            for kw in ("是什么", "公司有哪些", "有哪些产品", "公司卖什么", "区别")
+        )
     )
     if is_general_query:
         return PerceptionResult(
@@ -631,7 +651,11 @@ def _needs_clarification(
     slots_catalog = load_slot_catalog()
     slot_def = slots_catalog[slot]
     product_val = entities.product or "这个设备"
-    question = slot_def.question.format(product=product_val) if "{product}" in slot_def.question else slot_def.question
+    question = (
+        slot_def.question.format(product=product_val)
+        if "{product}" in slot_def.question
+        else slot_def.question
+    )
     return PerceptionResult(
         intent=intent,  # type: ignore[arg-type]
         emotion=emotion,  # type: ignore[arg-type]
@@ -658,9 +682,7 @@ def _extract_product(message: str) -> str | None:
     return lookup_product(message)
 
 
-def _extract_issue(
-    message: str, usage_words: tuple[str, ...]
-) -> str | None:
+def _extract_issue(message: str, usage_words: tuple[str, ...]) -> str | None:
     for word in usage_words:
         if word in message.lower():
             return word
