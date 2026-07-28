@@ -34,8 +34,3 @@
 
 原始：「连不上」主题：Dexcom G7；被拒证据涉及防水等级
 → rewritten_question: "Dexcom G7 蓝牙连接失败 排查"
-
-# 输出
-严格输出 JSON 格式：
-- rewritten_question: string
-- reason: 一句话说明改写依据

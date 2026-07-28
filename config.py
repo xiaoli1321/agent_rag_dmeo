@@ -48,6 +48,17 @@ class DemoSettings(BaseSettings):
     agent_fusion_alpha: float = Field(default=0.7, ge=0.0, le=1.0)
     agent_corrective_retries: int = Field(default=1, ge=0, le=2)
     agent_llm_graders_enabled: bool = True
+    # Keep short structured calls bounded. Large generation budgets on these
+    # calls disproportionately increase end-to-end RAG latency.
+    agent_intent_max_tokens: int = Field(default=1000, ge=1)
+    agent_short_reply_max_tokens: int = Field(default=250, ge=1)
+    agent_rag_rewrite_max_tokens: int = Field(default=300, ge=1)
+    agent_rag_document_grader_max_tokens: int = Field(default=250, ge=1)
+    agent_rag_grounding_grader_max_tokens: int = Field(default=350, ge=1)
+    agent_rag_answer_max_tokens: int = Field(default=800, ge=1)
+    # Bound parallel grading so a single request does not exhaust provider QPS.
+    agent_llm_grader_max_concurrency: int = Field(default=4, ge=1, le=8)
+    agent_empathy_temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     agent_intent_confidence_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     agent_max_clarification_turns: int = Field(default=2, ge=1, le=5)
     agent_max_angry_turns: int = Field(default=3, ge=1, le=10)
@@ -138,7 +149,8 @@ class DemoSettings(BaseSettings):
 
     @property
     def llm_extra_body(self) -> dict[str, object] | None:
-        if self.llm_model and self.llm_model.lower().startswith("qwen3"):
+        model = (self.llm_model or "").lower()
+        if model.startswith("qwen3"):
             return {"enable_thinking": False}
         return None
 

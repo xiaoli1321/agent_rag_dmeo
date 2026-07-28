@@ -13,8 +13,9 @@ from .models import (
     PendingClarification,
     PerceptionEntities,
     PerceptionResult,
+    StrictIntentDraft,
 )
-from .chat_factory import get_chat
+from .chat_factory import get_chat, get_deepseek_strict_chat
 from .intent_catalog import (
     catalog_prompt_context,
     load_intent_catalog,
@@ -73,10 +74,11 @@ class PerceptionService:
             -self.settings.agent_perception_history_turns :
         ]
         history_text = "\n".join(history_rows) or "无"
-        chat = get_chat(
+        chat = get_deepseek_strict_chat(
             self.settings,
-            temperature=self.temperature,
-            max_tokens=min(self.settings.llm_max_tokens, 2048),
+            max_tokens=min(
+                self.settings.llm_max_tokens, self.settings.agent_intent_max_tokens
+            ),
         )
         try:
             system_prompt = render_prompt(
@@ -89,7 +91,11 @@ class PerceptionService:
                 if history_text != "无"
                 else f"当前用户消息：{message}"
             )
-            structured = chat.with_structured_output(IntentDraft, method="json_mode")
+            structured = chat.with_structured_output(
+                StrictIntentDraft,
+                method="function_calling",
+                strict=True,
+            )
             result = structured.invoke(
                 [
                     SystemMessage(content=system_prompt),
@@ -98,8 +104,8 @@ class PerceptionService:
                 config={"run_name": "IntentPerceptionLLM"},
             )
             return (
-                result
-                if isinstance(result, IntentDraft)
+                IntentDraft.model_validate(result.model_dump())
+                if isinstance(result, StrictIntentDraft)
                 else IntentDraft.model_validate(result)
             ), "llm"
         except Exception:
@@ -120,8 +126,8 @@ class PerceptionService:
 
         chat = get_chat(
             self.settings,
-            temperature=0.7,
-            max_tokens=2048,
+            temperature=self.settings.agent_empathy_temperature,
+            max_tokens=self.settings.agent_short_reply_max_tokens,
         )
         try:
             system_prompt = render_prompt(
@@ -167,7 +173,7 @@ def heuristic_empathy(
         )
     return (
         f"十分抱歉【{pain_point}】给您带来了不好的体验。我已为您启动优先排查，"
-        "先为您提供下一步排查建议；若仍未解决，您可以随时回复“转人工”，我会立刻为您对接专员。"
+        "先为您提供下一步排查建议。"
     )
 
 

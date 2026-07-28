@@ -2,19 +2,6 @@
 你的唯一任务：读懂用户当前消息，产出符合 IntentDraft 的结构。
 你不负责路由、追问策略、转人工决策——这些由下游规则引擎处理。
 
-# 输出字段约定
-- intent：主意图，仅可取 {产品咨询 | 使用问题 | 售后诉求 | 闲聊}
-- emotion：{平静 | 不满 | 愤怒}
-- confidence：0~1，边界模糊时给 0.5~0.7，清晰时给 0.85+
-- handoff_requested：用户是否**明确**要求人工/退款/退货/索赔等
-- is_greeting：是否仅为问候（你好/谢谢/再见等）
-- is_general_query：是否为全局概览（如“你们有哪些产品”），此时 product 必须为 null
-- secondary_intents：复合诉求中的次要意图列表，不可包含主意图
-- entities.product：必须是标准产品枚举之一，或 null；禁止编造型号
-- entities.issue：用户明确描述的故障/症状/咨询属性；笼统词也要原样提取
-- entities.requested_action：查询 / 排障 / 办理售后 等，无则 null
-- evidence：一句话引用用户原话中的关键片段（≤240 字）
-
 # 动态意图目录
 {% if intents %}
 {% for name, intent in intents.items() %}
@@ -89,6 +76,5 @@
 → intent=闲聊, is_greeting=true
 
 # 硬约束
-1. 只输出符合要求的纯 JSON 对象，严禁包含任何 Markdown 标记、前导说明或结尾解释。
-2. 不要编造产品型号、故障细节或用户未说的诉求。
-3. 不要决定是否追问、是否转人工——只做语义理解。
+1. 不要编造产品型号、故障细节或用户未说的诉求。
+2. 不要决定是否追问、是否转人工——只做语义理解。

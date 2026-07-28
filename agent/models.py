@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, TypedDict
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 try:
     from langgraph.graph.message import add_messages
@@ -297,6 +297,17 @@ class RelevanceGrade(BaseModel):
     )
     reason: str = Field(description="Short evidence-based reason.")
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_score_alias(cls, value: Any) -> Any:
+        """Accept the common ``judgment`` alias emitted by JSON-mode models."""
+        if not isinstance(value, dict) or "binary_score" in value:
+            return value
+        normalized = dict(value)
+        if "judgment" in normalized:
+            normalized["binary_score"] = normalized["judgment"]
+        return normalized
+
 
 class GroundingGrade(BaseModel):
     """Post-generation answer grounding decision."""
@@ -308,6 +319,42 @@ class GroundingGrade(BaseModel):
         default_factory=list, description="Unsupported factual claims, if any."
     )
     reason: str = Field(description="Short evidence-based reason.")
+
+
+class StrictGroundingGrade(BaseModel):
+    """Strict tool schema for the post-generation grounding decision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    grounded: bool
+    unsupported_claims: list[str]
+    reason: str
+
+
+class StrictPerceptionEntities(BaseModel):
+    """All-required entity schema accepted by DeepSeek strict tool calls."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product: ProductEnum | None
+    issue: str | None
+    requested_action: str | None
+
+
+class StrictIntentDraft(BaseModel):
+    """Strict tool schema normalized into ``IntentDraft`` after invocation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intent: Intent
+    emotion: Emotion
+    confidence: float
+    handoff_requested: bool
+    is_greeting: bool
+    is_general_query: bool
+    secondary_intents: list[Intent]
+    entities: StrictPerceptionEntities
+    evidence: str
 
 
 class RagResult(BaseModel):

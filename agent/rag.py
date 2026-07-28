@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 import re
 from time import perf_counter
@@ -9,7 +11,7 @@ from typing import Callable, TypeVar
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-from .chat_factory import get_chat
+from .chat_factory import get_chat, get_deepseek_strict_chat
 from .embeddings import get_embeddings
 from .models import (
     DocumentGrade,
@@ -20,6 +22,7 @@ from .models import (
     RagResult,
     RelevanceGrade,
     RetrievedDoc,
+    StrictGroundingGrade,
 )
 from .product_aliases import load_product_aliases
 from .prompts import load_prompt
@@ -381,7 +384,26 @@ class RagService:
         返回:
             list[DocumentGrade]: 各个文档的评估打分结果。
         """
-        return [self._grade_document(question, doc, attempt=attempt) for doc in docs]
+        if len(docs) < 2 or self.settings.agent_llm_grader_max_concurrency == 1:
+            return [self._grade_document(question, doc, attempt=attempt) for doc in docs]
+
+        # New worker threads do not inherit contextvars by default. Copy the
+        # current tracing context so LangSmith keeps these calls nested under
+        # the active LangGraph run. Read futures in candidate order because
+        # downstream zips grades with candidates.
+        workers = min(self.settings.agent_llm_grader_max_concurrency, len(docs))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(
+                    copy_context().run,
+                    self._grade_document,
+                    question,
+                    doc,
+                    attempt=attempt,
+                )
+                for doc in docs
+            ]
+            return [future.result() for future in futures]
 
     def _grade_document(
         self, question: str, doc: RetrievedDoc, *, attempt: int
@@ -530,8 +552,15 @@ class RagService:
             doc.chunk_text[:600] for doc in (rejected_docs or [])
         )
         try:
-            chat = self._structured_chat(max_tokens=2048)
-            return chat.with_structured_output(QueryRewrite, method="json_mode").invoke(
+            chat = get_deepseek_strict_chat(
+                self.settings,
+                max_tokens=self.settings.agent_rag_rewrite_max_tokens,
+            )
+            return chat.with_structured_output(
+                QueryRewrite,
+                method="function_calling",
+                strict=True,
+            ).invoke(
                 load_prompt("rag_rewrite.md").format(
                     question=stripped,
                     topic_hint=topic_hint or "",
@@ -690,7 +719,9 @@ class RagService:
         chat = get_chat(
             self.settings,
             temperature=self.settings.llm_temperature,
-            max_tokens=min(self.settings.llm_max_tokens, 2048),
+            max_tokens=min(
+                self.settings.llm_max_tokens, self.settings.agent_rag_answer_max_tokens
+            ),
         )
         try:
             message = chat.invoke(
@@ -727,25 +758,36 @@ class RagService:
         """
         调用 LLM 对文档块与提问的实际相关性进行结构化输出判定。
         """
-        chat = self._structured_chat(max_tokens=2048)
+        chat = get_deepseek_strict_chat(
+            self.settings,
+            max_tokens=self.settings.agent_rag_document_grader_max_tokens,
+        )
         prompt = load_prompt("rag_document_grader.md").format(
             question=question, document=doc.chunk_text
         )
-        return chat.with_structured_output(RelevanceGrade, method="json_mode").invoke(
-            prompt
-        )
+        return chat.with_structured_output(
+            RelevanceGrade,
+            method="function_calling",
+            strict=True,
+        ).invoke(prompt)
 
     def _llm_grounding_grade(self, answer: str, evidence: str) -> GroundingGrade:
         """
         调用 LLM 判断生成的回答是否可以被给定的参考证据（文档）充分蕴含支撑（避免语义级别的幻觉问题）。
         """
-        chat = self._structured_chat(max_tokens=2048)
+        chat = get_deepseek_strict_chat(
+            self.settings,
+            max_tokens=self.settings.agent_rag_grounding_grader_max_tokens,
+        )
         prompt = load_prompt("rag_grounding_grader.md").format(
             answer=answer, evidence=evidence
         )
-        return chat.with_structured_output(GroundingGrade, method="json_mode").invoke(
-            prompt
-        )
+        grade = chat.with_structured_output(
+            StrictGroundingGrade,
+            method="function_calling",
+            strict=True,
+        ).invoke(prompt)
+        return GroundingGrade.model_validate(grade.model_dump())
 
 
 def format_references(docs: list[RetrievedDoc]) -> str:

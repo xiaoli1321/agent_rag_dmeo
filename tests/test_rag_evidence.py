@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from ..agent.models import RetrievedDoc
+import inspect
+from threading import Lock
+from time import sleep
+
+from ..agent.models import DocumentGrade, RetrievedDoc
 from ..agent.rag import (
     RagService,
     _ensure_answer_body,
@@ -12,6 +16,13 @@ from ..agent.rag import (
     format_references,
 )
 from ..config import DemoSettings
+
+
+def test_relevance_grader_uses_strict_function_calling() -> None:
+    source = inspect.getsource(RagService._llm_document_grade)
+
+    assert 'method="function_calling"' in source
+    assert "strict=True" in source
 
 
 def _service() -> RagService:
@@ -105,6 +116,44 @@ def test_document_grader_rejects_unrelated_context_without_domain_word_rules() -
 
     assert decision.binary_score == "no"
     assert decision.failure_type == "retrieval_mismatch"
+
+
+def test_document_grader_runs_in_parallel_and_preserves_document_order() -> None:
+    class ParallelProbeService(RagService):
+        active = 0
+        peak_active = 0
+        lock = Lock()
+
+        def _grade_document(
+            self, question: str, doc: RetrievedDoc, *, attempt: int
+        ) -> DocumentGrade:
+            with self.lock:
+                self.active += 1
+                self.peak_active = max(self.peak_active, self.active)
+            sleep(0.03)
+            with self.lock:
+                self.active -= 1
+            return DocumentGrade(
+                source_title=doc.source_title,
+                source_url=doc.source_url,
+                binary_score="yes",
+                reason=doc.chunk_text,
+                grader="heuristic",
+                attempt=attempt,
+            )
+
+    service = ParallelProbeService(
+        settings=_test_settings().model_copy(
+            update={"agent_llm_grader_max_concurrency": 2}
+        )
+    )
+    docs = [_doc(f"document-{index}") for index in range(4)]
+
+    grades = service.grade_documents("question", docs, attempt=2)
+
+    assert service.peak_active == 2
+    assert [grade.reason for grade in grades] == [doc.chunk_text for doc in docs]
+    assert [grade.attempt for grade in grades] == [2, 2, 2, 2]
 
 
 def test_explicit_product_tags_build_qdrant_prefilter() -> None:

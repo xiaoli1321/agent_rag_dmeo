@@ -445,7 +445,7 @@ class CustomerAgent:
                 chat = get_chat(
                     self.settings,
                     temperature=0.7,
-                    max_tokens=2048,
+                    max_tokens=self.settings.agent_short_reply_max_tokens,
                 )
                 system_prompt = render_prompt(
                     "smalltalk.jinja2",

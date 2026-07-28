@@ -6,6 +6,7 @@ from ..agent.models import (
     EvidenceDecision,
     PerceptionResult,
     RagResult,
+    RelevanceGrade,
     RetrievedDoc,
     IntentDraft,
 )
@@ -103,14 +104,39 @@ def test_heuristic_perception_returns_valid_schema() -> None:
     assert 0 <= result.confidence <= 1
 
 
-def test_all_structured_output_prompts_omit_redundant_json_format_instructions() -> None:
+def test_custom_empathy_temperature_setting() -> None:
+    settings = DemoSettings(_env_file=None, agent_empathy_temperature=1.0)
+
+    assert settings.agent_empathy_temperature == 1.0
+
+
+def test_non_handoff_empathy_fallback_does_not_proactively_offer_human_support() -> None:
+    from ..agent.perception import heuristic_empathy
+
+    answer = heuristic_empathy("蓝牙连接不上", intent="使用问题")
+
+    assert "转人工" not in answer
+    assert "专员" not in answer
+
+
+def test_strict_function_calling_prompts_omit_redundant_format_instructions() -> None:
+    redundant_phrases = ("json schema", "输出 json 格式", "纯 json 对象")
     for prompt_name in (
         "perception.jinja2",
         "rag_rewrite.md",
         "rag_document_grader.md",
         "rag_grounding_grader.md",
     ):
-        assert "json object" not in load_prompt(prompt_name).lower()
+        prompt = load_prompt(prompt_name).lower()
+        assert not any(phrase in prompt for phrase in redundant_phrases)
+
+
+def test_relevance_grade_accepts_json_mode_judgment_alias() -> None:
+    grade = RelevanceGrade.model_validate(
+        {"judgment": "yes", "reason": "文档包含可执行的蓝牙连接步骤。"}
+    )
+
+    assert grade.binary_score == "yes"
 
 
 def test_rag_structured_prompts_render_without_error() -> None:
@@ -683,6 +709,3 @@ def test_custom_agent_max_angry_turns_setting() -> None:
     assert third["consecutive_angry_count"] == 2
     assert third["active_agent"] == "after_sales"
     assert third["dialogue_status"] == "handed_off"
-
-
-
