@@ -13,17 +13,11 @@
       input.style.height = "auto";
       send.disabled = true;
       
-      // Add typing indicator element
-      const typingEl = document.createElement("div");
-      typingEl.className = "typing-indicator-wrapper";
-      typingEl.innerHTML = `
-        <div class="typing-bubble">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-      `;
-      messages.appendChild(typingEl);
+      // Create agent message element (with avatar) immediately,
+      // show typing dots inside the bubble while waiting for stream
+      const streamMsg = addMessage("agent", "", []);
+      const bubble = streamMsg.querySelector(".bubble");
+      bubble.innerHTML = `<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>`;
       messages.scrollTop = messages.scrollHeight;
       
       try {
@@ -35,15 +29,13 @@
         });
         
         if (response.ok) {
-          await handleStreamResponse(response, message, typingEl);
+          await handleStreamResponse(response, message, streamMsg, bubble);
         } else {
-          typingEl.remove();
-          addMessage("agent", `请求失败：HTTP ${response.status}`);
+          bubble.innerHTML = formatMarkdown(`请求失败：HTTP ${response.status}`);
         }
       } catch (error) {
         if (error.name === 'AbortError') return;
-        typingEl.remove();
-        addMessage("agent", `请求失败：${error.message || error}`);
+        bubble.innerHTML = formatMarkdown(`请求失败：${error.message || error}`);
       } finally {
         if (currentAbortController === abortController) currentAbortController = null;
         send.disabled = false;
@@ -51,19 +43,14 @@
       }
     }
     
-    async function handleStreamResponse(response, message, typingEl) {
-      let fullAnswer = "";
-      let finalState = null;
-      let streamMsg = null;
-      let bubble = null;
-      
+    async function handleStreamResponse(response, message, streamMsg, bubble) {
+      // response.body 为空时优雅降级
       if (!response.body) {
         const text = await response.text();
         try {
           const data = JSON.parse(text);
           if (data.answer) {
-            typingEl.remove();
-            addMessage("agent", data.answer, [], { suggestions: data.clarification?.options || [] });
+            bubble.innerHTML = formatMarkdown(data.answer);
             if (data.thread_id) {
               threadId = data.thread_id;
               localStorage.setItem("customer_agent_demo_thread_id", threadId);
@@ -73,6 +60,10 @@
         } catch {}
         return;
       }
+
+      let fullAnswer = "";
+      let finalState = null;
+      let stateHandled = false;
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -98,54 +89,67 @@
           
           if (event === "answer_token" && parsed.token) {
             fullAnswer += parsed.token;
-            if (!streamMsg) {
-              typingEl.remove();
-              streamMsg = addMessage("agent", "", []);
-              bubble = streamMsg.querySelector(".bubble");
+            // Only update streaming bubble if we haven't received the final state yet.
+            // After state is processed, subsequent tokens (hallucination check, etc.)
+            // must NOT write to the now-detached streaming bubble or overwrite the final message.
+            if (!stateHandled) {
+              bubble.innerHTML = formatMarkdown(fullAnswer);
+              messages.scrollTop = messages.scrollHeight;
             }
-            bubble.innerHTML = formatMarkdown(fullAnswer);
-            messages.scrollTop = messages.scrollHeight;
           } else if (event === "state") {
             finalState = parsed;
+            
+            // ── Immediately replace streaming bubble with final answer ──
+            // Build meta tags
+            const meta = [];
+            if (parsed.perception?.intent) meta.push(parsed.perception.intent);
+            if (parsed.perception?.emotion) meta.push(parsed.perception.emotion);
+            if (parsed.active_agent) meta.push(parsed.active_agent);
+            if (parsed.dialogue_status === "awaiting_clarification") meta.push("待澄清");
+            
+            // Replace streaming message with final (has references)
+            streamMsg.remove();
+            addMessage("agent", parsed.answer ?? fullAnswer, meta, {
+              suggestions: parsed.clarification?.options || [],
+            });
+            
+            setState(parsed);
+            
+            threadId = parsed.thread_id || threadId;
+            localStorage.setItem("customer_agent_demo_thread_id", threadId);
+            
+            stateHandled = true;
           } else if (event === "error") {
             throw new Error(parsed.error || "流式响应错误");
           }
         }
       }
       
-      if (finalState) {
-        if (streamMsg) streamMsg.remove();
-        
-        // Update threadId from server response (catches default-thread mapping)
-        threadId = finalState.thread_id || threadId;
-        localStorage.setItem("customer_agent_demo_thread_id", threadId);
-        
+      if (stateHandled) {
+        const freshSessions = await fetchSessions();
+        if (freshSessions.length > 0 || !sessions.length) { sessions = freshSessions; }
+        renderConversations();
+      } else if (finalState) {
+        bubble.innerHTML = formatMarkdown(finalState.answer ?? fullAnswer);
         const meta = [];
         if (finalState.perception?.intent) meta.push(finalState.perception.intent);
         if (finalState.perception?.emotion) meta.push(finalState.perception.emotion);
         if (finalState.active_agent) meta.push(finalState.active_agent);
         if (finalState.dialogue_status === "awaiting_clarification") meta.push("待澄清");
-        
-        // Use nullish coalescing: only fall back to fullAnswer when answer is null/undefined,
-        // NOT when it's an empty string (prevents dropping references when answer is "")
+        streamMsg.remove();
         addMessage("agent", finalState.answer ?? fullAnswer, meta, {
           suggestions: finalState.clarification?.options || [],
         });
-        
         setState(finalState);
-        
-        // Refresh session list, guard against API failure clearing sidebar
+        threadId = finalState.thread_id || threadId;
+        localStorage.setItem("customer_agent_demo_thread_id", threadId);
         const freshSessions = await fetchSessions();
-        if (freshSessions.length > 0 || !sessions.length) {
-          sessions = freshSessions;
-        }
+        if (freshSessions.length > 0 || !sessions.length) { sessions = freshSessions; }
         renderConversations();
-      } else if (streamMsg) {
-        // State event never arrived (network interruption, server crash, etc.)
-        // Finalize with whatever streaming tokens we accumulated
-        streamMsg.remove();
-        addMessage("agent", fullAnswer);
       }
+      // No else-if fallback needed: the pre-created streamMsg already exists with
+      // whatever tokens were accumulated (fullAnswer). The typing dots were replaced
+      // by answer_token events above.
     }
     
     function parseSSEEvent(part) {

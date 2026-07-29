@@ -8,5 +8,5 @@ data/conversations/
 .agents/
 .codex/
 
-# 旧数据目录（已迁移到 data/）
-customer_agent_demo/
+# 会话存储目录
+data/runs/

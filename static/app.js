@@ -123,6 +123,15 @@
       userInitiatedNewThread = true;
       threadId = createThreadId();
       localStorage.setItem("customer_agent_demo_thread_id", threadId);
+      // Immediately show the new conversation in the sidebar
+      sessions.unshift({
+        thread_id: threadId,
+        title: "新对话",
+        message_count: 0,
+        created_at: new Date().toISOString(),
+        last_updated: new Date().toISOString(),
+      });
+      renderConversations();
       await renderSession();
       input.focus();
     });

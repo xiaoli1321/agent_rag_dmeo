@@ -194,6 +194,18 @@
 
     .typing-bubble span:nth-child(1) { animation-delay: -0.32s; }
     .typing-bubble span:nth-child(2) { animation-delay: -0.16s; }
+    
+    /* Inline typing dots inside agent bubble (no nested bubble wrapper) */
+    .typing-dot {
+      width: 7px;
+      height: 7px;
+      background-color: var(--accent-solid);
+      border-radius: 50%;
+      display: inline-block;
+      animation: bounce 1.4s infinite ease-in-out both;
+    }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
 
     @keyframes bounce {
       0%, 80%, 100% { transform: scale(0.3); opacity: 0.4; }
