@@ -65,17 +65,28 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             # 静态文件
             static_path = STATIC_DIR / self.path.lstrip("/")
             if static_path.is_file() and static_path.parent == STATIC_DIR:
-                ext = static_path.suffix
-                ctype = {
+                ext = static_path.suffix.lstrip(".").lower()
+                text_types = {"css", "js", "html", "svg", "json", "xml", "txt"}
+                bin_types = {
+                    "png": "image/png",
+                    "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg",
+                    "gif": "image/gif",
+                    "webp": "image/webp",
+                    "ico": "image/x-icon",
+                    "svg": "image/svg+xml",
+                }
+                ctype = bin_types.get(ext) or {
                     "css": "text/css; charset=utf-8",
                     "js": "application/javascript; charset=utf-8",
                     "html": "text/html; charset=utf-8",
-                    "png": "image/png",
-                    "svg": "image/svg+xml",
-                }.get(ext.lstrip("."), "application/octet-stream")
-                self._send_text(
-                    static_path.read_text(encoding="utf-8"), content_type=ctype
-                )
+                }.get(ext, "application/octet-stream")
+                if ext in text_types:
+                    self._send_text(
+                        static_path.read_text(encoding="utf-8"), content_type=ctype
+                    )
+                else:
+                    self._send_bytes(static_path.read_bytes(), content_type=ctype)
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -141,7 +152,7 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
                         store.append_turn(
                             thread_id,
                             message,
-                            answer,
+                            response.get("answer") or answer,
                             response,
                             meta=meta,
                             suggestions=suggestions,
@@ -184,6 +195,7 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(body)
 
@@ -195,6 +207,14 @@ def create_handler(agent: CustomerAgent) -> type[BaseHTTPRequestHandler]:
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_bytes(self, data: bytes, *, content_type: str) -> None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
+            self.wfile.write(data)
 
     return DemoRequestHandler
 

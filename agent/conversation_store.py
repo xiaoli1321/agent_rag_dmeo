@@ -50,6 +50,17 @@ class ConversationStore:
             line = line.strip()
             if line:
                 messages.append(json.loads(line))
+        # Patch old entries: agent messages whose text lacks the "引用：" section
+        # but have it in state.answer (pre-fix stored raw stream tokens instead
+        # of the full answer). Use state.answer as text so references show up.
+        for msg in messages:
+            if msg.get("role") == "agent":
+                text = msg.get("text", "")
+                state = msg.get("state")
+                if state and "引用" not in text:
+                    state_answer = state.get("answer", "")
+                    if "引用" in state_answer:
+                        msg["text"] = state_answer
         return messages
 
     def append_turn(

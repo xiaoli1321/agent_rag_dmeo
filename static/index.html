@@ -3,24 +3,41 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CGM 智能客服 Agent 演示系统</title>
-  <link rel="stylesheet" href="style.css">
+  <title>SIBIONICS CGM 智能客服</title>
+  <link rel="icon" type="image/png" href="favicon.png" />
+  <link rel="stylesheet" href="brand.css">
+  <link rel="stylesheet" href="layout.css">
+  <link rel="stylesheet" href="chat.css">
+  <link rel="stylesheet" href="components.css">
 </head>
 
 <body>
   <div class="app-layout">
+    <!-- Ambient brand waveforms -->
+    <div class="brand-waveform-container" aria-hidden="true">
+      <svg class="brand-waveform" viewBox="0 0 2400 320" preserveAspectRatio="none">
+        <path d="M0,160 C300,60 500,260 800,160 C1100,60 1300,260 1600,160 C1900,60 2100,260 2400,160" fill="none" stroke="rgba(124,255,103,0.3)" stroke-width="2.5" />
+        <path d="M0,200 C400,100 600,300 1000,200 C1400,100 1800,300 2400,200" fill="none" stroke="rgba(180,151,207,0.24)" stroke-width="1.5" />
+      </svg>
+      <svg class="brand-waveform" viewBox="0 0 2400 420" preserveAspectRatio="none">
+        <path d="M0,220 C200,120 400,320 600,220 C800,120 1000,320 1200,220 C1400,120 1600,320 1800,220 C2000,120 2200,320 2400,220" fill="none" stroke="rgba(124,255,103,0.42)" stroke-width="2.5" />
+        <path d="M0,260 C250,160 450,360 700,260 C950,160 1150,360 1400,260 C1650,160 1850,360 2100,260 C2250,180 2350,280 2400,240" fill="none" stroke="rgba(180,151,207,0.3)" stroke-width="2" />
+        <path d="M0,300 C300,200 500,400 800,300 C1100,200 1300,400 1600,300 C1900,200 2100,400 2400,300" fill="none" stroke="rgba(82,39,255,0.24)" stroke-width="1.5" />
+      </svg>
+      <svg class="brand-waveform" viewBox="0 0 2400 420" preserveAspectRatio="none">
+        <path d="M0,280 C350,180 550,380 900,280 C1250,180 1450,380 1800,280 C2050,200 2250,360 2400,300" fill="none" stroke="rgba(124,255,103,0.2)" stroke-width="1.8" />
+        <path d="M0,320 C400,220 600,420 1000,320 C1400,220 1600,420 2000,320 C2200,280 2300,340 2400,310" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1" />
+      </svg>
+    </div>
+
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="logo-area">
-          <div class="logo-icon-wrapper">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-          </div>
+          <img src="logo.png" alt="SIBIONICS" class="brand-logo">
           <div class="logo-text-group">
             <span class="logo-title">CGM 智能客服</span>
-            <span class="logo-subtitle">LangGraph Multi-Agent</span>
+            <span class="logo-subtitle">SIBIONICS · Multi-Agent</span>
           </div>
         </div>
       </div>
@@ -222,12 +239,7 @@
     <!-- Inspector Collapsible Panel (Apple iOS Segmented Control Design) -->
     <aside class="inspector" id="inspector">
       <div class="inspector-header">
-        <h3>
-          <svg viewBox="0 0 24 24" width="16" height="16" stroke="var(--accent-solid)" stroke-width="2.2" fill="none">
-            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-          </svg>
-          Agent 调试控制台
-        </h3>
+        <h3>Agent 调试控制台</h3>
         <button id="close-inspector" class="icon-btn-small" title="关闭控制台">
           <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -331,6 +343,10 @@
       <pre id="modal-body" class="modal-body"></pre>
     </div>
   </div>
+  <script src="format-markdown.js"></script>
+  <script src="api.js"></script>
+  <script src="ui.js"></script>
+  <script src="chat.js"></script>
   <script src="app.js"></script>
 </body>
 

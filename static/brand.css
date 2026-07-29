@@ -1,0 +1,91 @@
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Plus Jakarta Sans', 'Inter', ui-sans-serif, system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    [data-theme="light"] {
+      --bg: #f5f7fa;
+      --bg-ambient: radial-gradient(ellipse at 50% -20%, rgba(0, 168, 132, 0.06) 0%, rgba(245, 247, 250, 0) 70%);
+      --sidebar-bg: rgba(241, 245, 249, 0.92);
+      --panel-bg: #ffffff;
+      --panel-hover: #f8fafc;
+      --border: rgba(15, 23, 42, 0.08);
+      --border-hover: rgba(15, 23, 42, 0.16);
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --accent-gradient: linear-gradient(135deg, #00b894 0%, #00a884 100%);
+      --accent-solid: #00a884;
+      --accent-solid-rgb: 0, 168, 132;
+      --accent-light: rgba(0, 168, 132, 0.08);
+      --accent-hover: #009e7e;
+      --user-bubble: #0f172a;
+      --user-text: #ffffff;
+      --agent-bubble: #ffffff;
+      --agent-text: #1e293b;
+      --card-shadow: 0 2px 10px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.02);
+      --glow-shadow: 0 8px 25px rgba(0, 168, 132, 0.2);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --scrollbar-thumb: #cbd5e1;
+      --glass-blur: blur(20px);
+    }
+
+    [data-theme="dark"] {
+      --bg: #000000;
+      --bg-ambient: radial-gradient(ellipse at 50% -20%, rgba(0, 212, 170, 0.12) 0%, rgba(0, 0, 0, 0) 70%);
+      --sidebar-bg: rgba(18, 18, 22, 0.88);
+      --panel-bg: rgba(28, 28, 35, 0.78);
+      --panel-hover: rgba(38, 38, 48, 0.85);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-hover: rgba(255, 255, 255, 0.18);
+      --text: #f8fafc;
+      --text-muted: #8e8e93;
+      --accent-gradient: linear-gradient(135deg, #00d4aa 0%, #00b894 100%);
+      --accent-solid: #00d4aa;
+      --accent-solid-rgb: 0, 212, 170;
+      --accent-light: rgba(0, 212, 170, 0.12);
+      --accent-hover: #00c49a;
+      --user-bubble: #1c1c1e;
+      --user-text: #ffffff;
+      --agent-bubble: rgba(28, 28, 35, 0.9);
+      --agent-text: #f2f2f7;
+      --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      --glow-shadow: 0 8px 25px rgba(0, 212, 170, 0.25);
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --scrollbar-thumb: #3a3a3c;
+      --glass-blur: blur(24px);
+    }
+
+    /* ── Brand assets ──────────────────────────────────── */
+    .brand-logo {
+      height: 28px;
+      width: auto;
+      display: block;
+      flex-shrink: 0;
+    }
+
+    .brand-waveform-container {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+      opacity: 0.4;
+    }
+    .brand-waveform {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+    }
+    .brand-waveform:nth-child(1) { top: -10%; }
+    .brand-waveform:nth-child(2) { top: 30%; }
+    .brand-waveform:nth-child(3) { top: 60%; }
+
